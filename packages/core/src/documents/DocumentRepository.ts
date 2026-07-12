@@ -12,6 +12,14 @@ export class SectionDepthError extends Error {
   }
 }
 
+function assertDepthOk(sections: readonly WrenSection[]): void {
+  for (const section of sections) {
+    if (section.depth > MAX_SECTION_DEPTH) {
+      throw new SectionDepthError(section.id, section.depth);
+    }
+  }
+}
+
 interface DocumentRow {
   id: string;
   title: string;
@@ -72,45 +80,64 @@ export class DocumentRepository {
   constructor(private readonly engine: SqlEngine) {}
 
   async insertDocument(doc: WrenDocument): Promise<void> {
-    await this.engine.exec(
-      'INSERT INTO documents (id, title, source_type, created_at, meta) VALUES (?, ?, ?, ?, ?)',
-      [doc.id, doc.title, doc.sourceType, doc.createdAt, doc.meta ? JSON.stringify(doc.meta) : null],
-    );
+    await this.insertDocumentRow(doc);
   }
 
   /** Batched in a single transaction. Rejects the whole batch if any section exceeds MAX_SECTION_DEPTH. */
   async insertSections(sections: readonly WrenSection[]): Promise<void> {
-    for (const section of sections) {
-      if (section.depth > MAX_SECTION_DEPTH) {
-        throw new SectionDepthError(section.id, section.depth);
-      }
-    }
-
+    assertDepthOk(sections);
     await this.engine.exec('BEGIN');
     try {
       for (const section of sections) {
-        const contentHash = await hashContent(section.content);
-        await this.engine.exec(
-          `INSERT INTO sections (id, doc_id, parent_id, ordinal, depth, heading, content, label, content_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            section.id,
-            section.docId,
-            section.parentId,
-            section.ordinal,
-            section.depth,
-            section.heading,
-            section.content,
-            section.label,
-            contentHash,
-          ],
-        );
+        await this.insertSectionRow(section);
       }
       await this.engine.exec('COMMIT');
     } catch (error) {
       await this.engine.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  /** The document and all of its sections in one transaction: both land, or neither does. */
+  async insertDocumentAndSections(doc: WrenDocument, sections: readonly WrenSection[]): Promise<void> {
+    assertDepthOk(sections);
+    await this.engine.exec('BEGIN');
+    try {
+      await this.insertDocumentRow(doc);
+      for (const section of sections) {
+        await this.insertSectionRow(section);
+      }
+      await this.engine.exec('COMMIT');
+    } catch (error) {
+      await this.engine.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private async insertDocumentRow(doc: WrenDocument): Promise<void> {
+    await this.engine.exec(
+      'INSERT INTO documents (id, title, source_type, created_at, meta) VALUES (?, ?, ?, ?, ?)',
+      [doc.id, doc.title, doc.sourceType, doc.createdAt, doc.meta ? JSON.stringify(doc.meta) : null],
+    );
+  }
+
+  private async insertSectionRow(section: WrenSection): Promise<void> {
+    const contentHash = await hashContent(section.content);
+    await this.engine.exec(
+      `INSERT INTO sections (id, doc_id, parent_id, ordinal, depth, heading, content, label, content_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        section.id,
+        section.docId,
+        section.parentId,
+        section.ordinal,
+        section.depth,
+        section.heading,
+        section.content,
+        section.label,
+        contentHash,
+      ],
+    );
   }
 
   /**
