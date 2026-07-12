@@ -1,5 +1,6 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
-import { Wren, type IngestOptions, type IngestProgress, type IngestResult, type WrenDocument, type WrenSource, type WrenTool } from '@wren/core';
+import { Wren, type IngestOptions, type IngestProgress, type IngestResult, type WrenDocument, type WrenResponse, type WrenSource, type WrenTool } from '@wren/core';
+import { Observable } from 'rxjs';
 import { WREN_OPTIONS } from './wren-options.js';
 
 /**
@@ -113,5 +114,50 @@ export class WrenService {
     if (!wren) return;
     await wren.deleteDocument(id);
     await this.refreshDocuments();
+  }
+
+  /** Emits the response once and completes. Unsubscribing before then aborts the query via AbortSignal. */
+  query(text: string): Observable<WrenResponse> {
+    return new Observable<WrenResponse>((subscriber) => {
+      const wren = this.wrenSignal();
+      if (!wren) {
+        subscriber.error(new Error('WrenService is not ready yet'));
+        return undefined;
+      }
+      const controller = new AbortController();
+      wren
+        .query(text, { signal: controller.signal })
+        .then((response) => {
+          subscriber.next(response);
+          subscriber.complete();
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) subscriber.error(error);
+        });
+      return () => controller.abort();
+    });
+  }
+
+  /** Same cancellation contract as query(), but emits once per streamed chunk; the final emission's answer is the full accumulated text. */
+  queryStreaming(text: string): Observable<Partial<WrenResponse>> {
+    return new Observable<Partial<WrenResponse>>((subscriber) => {
+      const wren = this.wrenSignal();
+      if (!wren) {
+        subscriber.error(new Error('WrenService is not ready yet'));
+        return undefined;
+      }
+      const controller = new AbortController();
+      (async () => {
+        try {
+          for await (const partial of wren.queryStreaming(text, { signal: controller.signal })) {
+            subscriber.next(partial);
+          }
+          subscriber.complete();
+        } catch (error) {
+          if (!controller.signal.aborted) subscriber.error(error);
+        }
+      })();
+      return () => controller.abort();
+    });
   }
 }
