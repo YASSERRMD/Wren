@@ -6,3 +6,5 @@ export { WrenProvider } from './WrenProvider.js';
 export type { WrenProviderProps } from './WrenProvider.js';
 export { useWren } from './useWren.js';
 export { useTool } from './useTool.js';
+export { useQuery } from './useQuery.js';
+export type { UseQueryResult } from './useQuery.js';
