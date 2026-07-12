@@ -31,3 +31,7 @@ export {
 export { MockNanoAdapter } from './nano/MockNanoAdapter.js';
 export type { MockNanoCall } from './nano/MockNanoAdapter.js';
 
+export { parse } from './ingest/parse.js';
+export type { ParseOptions, ParsedDocument, ParseWarning, WrenSource } from './ingest/types.js';
+export { DEFAULT_MAX_SECTION_CHARS } from './ingest/types.js';
+
