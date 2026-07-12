@@ -8,7 +8,7 @@ import type { WrenSource } from './ingest/types.js';
 import type { LabelStrategy } from './labelling/createLabelGenerator.js';
 import { NanoAdapter } from './nano/NanoAdapter.js';
 import type { NanoAdapterLike } from './nano/NanoAdapter.js';
-import type { LanguageModelCreateOptions } from './nano/language-model.js';
+import type { LanguageModelCreateOptions, NanoAvailability } from './nano/language-model.js';
 import { LexicalRetriever } from './retrieval/LexicalRetriever.js';
 import type { SqlEngine } from './storage/migrations.js';
 import { WrenStorage } from './storage/WrenStorage.js';
@@ -41,6 +41,13 @@ interface WrenDefaults {
   budgetRatio: number;
 }
 
+/** Lets a consumer degrade knowingly instead of discovering missing capabilities via a thrown error mid-use. */
+export interface WrenSupport {
+  storage: boolean;
+  nano: NanoAvailability;
+  webmcp: boolean;
+}
+
 /**
  * The only class most consumers touch directly: assembles storage, the
  * Nano adapter, the document repository, retriever, tool registry,
@@ -71,6 +78,14 @@ export class Wren {
       maxSectionChars: opts.maxSectionChars ?? DEFAULT_MAX_SECTION_CHARS,
       budgetRatio: opts.budgetRatio ?? DEFAULT_BUDGET_RATIO,
     });
+  }
+
+  static async isSupported(): Promise<WrenSupport> {
+    return {
+      storage: WrenStorage.isSupported(),
+      nano: await NanoAdapter.availability(),
+      webmcp: typeof navigator !== 'undefined' && navigator.modelContext !== undefined,
+    };
   }
 
   async ingest(source: WrenSource, opts: IngestOptions = {}): Promise<IngestResult> {
