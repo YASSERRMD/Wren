@@ -52,5 +52,5 @@ export { LexicalRetriever } from './retrieval/LexicalRetriever.js';
 export type { Candidate, LexicalSearchOptions } from './retrieval/LexicalRetriever.js';
 
 export type { WrenTool, WrenToolResult } from './tools/WrenTool.js';
-export { ToolRegistry } from './tools/ToolRegistry.js';
+export { ToolNameError, ToolRegistry } from './tools/ToolRegistry.js';
 

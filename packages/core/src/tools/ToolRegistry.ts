@@ -2,6 +2,18 @@ import { matchesSchema } from '../nano/validateSchema.js';
 import type { WrenTool, WrenToolResult } from './WrenTool.js';
 import './webmcp.js';
 
+const NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
+const MAX_NAME_LENGTH = 40;
+/** Nano's tool selection accuracy degrades as tool count rises. */
+const TOOL_CAP = 7;
+
+export class ToolNameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolNameError';
+  }
+}
+
 /**
  * Framework-agnostic tool source: the declarative React/Angular bindings
  * (Phases 12, 13) are built on the unregister handle register() returns.
@@ -15,7 +27,9 @@ export class ToolRegistry {
   private readonly webmcpControllers = new Map<string, AbortController>();
 
   register(tool: WrenTool): () => void {
+    this.assertValidName(tool.name);
     this.tools.set(tool.name, tool);
+    this.warnIfOverCap();
     this.mirrorToWebMcp(tool);
     return () => this.unregister(tool.name);
   }
@@ -50,6 +64,29 @@ export class ToolRegistry {
         content: `Tool "${name}" threw: ${error instanceof Error ? error.message : String(error)}`,
         isError: true,
       };
+    }
+  }
+
+  private assertValidName(name: string): void {
+    if (!NAME_PATTERN.test(name)) {
+      throw new ToolNameError(
+        `Tool name "${name}" must match ${NAME_PATTERN} (lowercase letters, digits, underscore, starting with a letter)`,
+      );
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      throw new ToolNameError(`Tool name "${name}" is ${name.length} characters, over the maximum of ${MAX_NAME_LENGTH}`);
+    }
+    if (this.tools.has(name)) {
+      throw new ToolNameError(`A tool named "${name}" is already registered`);
+    }
+  }
+
+  private warnIfOverCap(): void {
+    if (this.tools.size > TOOL_CAP) {
+      console.warn(
+        `Wren: ${this.tools.size} tools registered, exceeding the recommended cap of ${TOOL_CAP}. ` +
+          `Nano's tool selection accuracy degrades as tool count rises.`,
+      );
     }
   }
 
