@@ -19,6 +19,24 @@ const DEFAULT_LIMIT = 8;
 /** heading and label columns weighted above content: a match in the label is a stronger signal than one deep in body text. */
 const BM25_WEIGHTS = '3.0, 1.0, 3.0';
 
+function tokenize(query: string): string[] {
+  return query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+}
+
+/**
+ * Rebuilds the query from tokenised, quoted terms rather than passing the
+ * user's string into MATCH directly: this is what neutralises FTS5's
+ * operator syntax (AND, OR, NOT, NEAR, *, ", column:filters) rather than
+ * trying to escape it, since only alphanumeric characters survive
+ * tokenisation and each surviving term is wrapped as a literal phrase. A
+ * user typing NOT should not silently become a boolean operator.
+ */
+function buildMatchExpression(query: string): string | undefined {
+  const terms = tokenize(query);
+  if (terms.length === 0) return undefined;
+  return terms.map((term) => `"${term}"`).join(' ');
+}
+
 interface SectionRow {
   id: string;
   doc_id: string;
@@ -33,8 +51,11 @@ export class LexicalRetriever {
   constructor(private readonly engine: SqlEngine) {}
 
   async search(query: string, opts: LexicalSearchOptions = {}): Promise<Candidate[]> {
+    const matchExpr = buildMatchExpression(query);
+    if (!matchExpr) return [];
+
     const limit = opts.limit ?? DEFAULT_LIMIT;
-    const params: unknown[] = [query];
+    const params: unknown[] = [matchExpr];
     let docFilter = '';
     if (opts.docIds && opts.docIds.length > 0) {
       docFilter = `AND s.doc_id IN (${opts.docIds.map(() => '?').join(', ')})`;
