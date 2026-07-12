@@ -22,11 +22,16 @@ class NodeSqlEngine implements SqlEngine {
       returnValue: 'resultRows',
     }) as T[];
   }
+
+  /** So this can stand in for WrenStorage wherever a test needs something Wren.destroy() can call close() on. */
+  async close(): Promise<void> {
+    this.db.close();
+  }
 }
 
 let sqlite3: Sqlite3Static | undefined;
 
-export async function createNodeSqlEngine(): Promise<SqlEngine> {
+export async function createNodeSqlEngine(): Promise<SqlEngine & { close(): Promise<void> }> {
   sqlite3 ??= await sqlite3InitModule();
   const db = new sqlite3.oo1.DB(':memory:', 'c');
   db.exec('PRAGMA foreign_keys = ON');

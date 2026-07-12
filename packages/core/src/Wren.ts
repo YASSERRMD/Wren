@@ -67,6 +67,19 @@ export class Wren {
   static async create(opts: WrenOptions = {}): Promise<Wren> {
     const storage = await WrenStorage.open(opts.dbName ?? DEFAULT_DB_NAME, MIGRATIONS);
     const nano = await NanoAdapter.create(opts.nanoOptions);
+    return Wren.assemble(storage, nano, opts);
+  }
+
+  /**
+   * Test seam: assembles a Wren from an already-open storage engine and
+   * Nano adapter, skipping the browser-only WrenStorage.open() /
+   * NanoAdapter.create() wiring create() does. Not exported from the
+   * package barrel; this package's own tests import it directly so they
+   * can substitute a Node SqlEngine and MockNanoAdapter for the two
+   * pieces that genuinely require a real browser.
+   * @internal
+   */
+  static assemble(storage: WrenStorageLike, nano: NanoAdapterLike, opts: WrenOptions = {}): Wren {
     const repo = new DocumentRepository(storage);
     const retriever = new LexicalRetriever(storage);
     const registry = new ToolRegistry(opts.toolCap);
