@@ -11,4 +11,5 @@ export { RpcError } from './storage/rpc-protocol.js';
 
 export type { WrenDocument, WrenSection, WrenSourceType, WrenTreeNode } from './types.js';
 export { INITIAL_MIGRATION } from './documents/migrations.js';
+export { DocumentRepository } from './documents/DocumentRepository.js';
 
