@@ -6,6 +6,15 @@ import type { ToolRegistry } from '../tools/ToolRegistry.js';
 import type { WrenSection } from '../types.js';
 import { DECISION_SCHEMA, type Citation, type DispatcherDecision, type WrenResponse, type WrenWarning } from './types.js';
 
+export interface DispatcherOptions {
+  /** Fraction of inputQuota a prompt may use before truncation kicks in, leaving headroom for output. */
+  budgetRatio?: number;
+}
+
+const DEFAULT_BUDGET_RATIO = 0.7;
+/** Rough chars-per-token used only to size a last-resort content truncation; never trusted for the go/no-go budget decision itself, which always calls estimateTokens. */
+const APPROX_CHARS_PER_TOKEN = 4;
+
 function truncateText(text: string, maxChars: number): string {
   const trimmed = text.trim();
   return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trim()}...`;
@@ -65,13 +74,13 @@ export class Dispatcher {
     private readonly registry: ToolRegistry,
   ) {}
 
-  async run(query: string): Promise<WrenResponse> {
+  async run(query: string, opts: DispatcherOptions = {}): Promise<WrenResponse> {
     const start = Date.now();
     const warnings: WrenWarning[] = [];
     let candidates = await this.retriever.search(query);
 
     let hops = 0;
-    let decision = await this.decide(query, candidates);
+    let decision = await this.decide(query, candidates, warnings, opts);
 
     // Hop cap is a hard invariant, not a suggestion: a 3B model cannot be
     // trusted with open-ended multi-hop navigation. A first navigate is
@@ -91,7 +100,7 @@ export class Dispatcher {
       }
       hops += 1;
       candidates = await this.retriever.getChildren(decision.sectionId);
-      decision = await this.decide(query, candidates);
+      decision = await this.decide(query, candidates, warnings, opts);
     }
 
     // The while condition above guarantees decision.action !== 'navigate'
@@ -111,7 +120,7 @@ export class Dispatcher {
     }
 
     if (resolved.action === 'answer') {
-      const sections = await this.repo.getSections(resolved.sectionIds);
+      let sections = await this.repo.getSections(resolved.sectionIds);
       if (sections.length === 0) {
         return {
           answer: 'No answer found: the chosen sections could not be located.',
@@ -121,6 +130,25 @@ export class Dispatcher {
           durationMs: Date.now() - start,
           warnings,
         };
+      }
+
+      // Ordered truncation: drop whole sections first, then, only if a
+      // single remaining section is still too big, shorten its content.
+      const budget = this.nano.quota.inputQuota * (opts.budgetRatio ?? DEFAULT_BUDGET_RATIO);
+      while (sections.length > 1 && (await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
+        sections = sections.slice(0, -1);
+        warnings.push({
+          kind: 'budget-truncated',
+          detail: `Dropped an answer section to fit the token budget; ${sections.length} remain.`,
+        });
+      }
+      if ((await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
+        const maxChars = Math.max(200, Math.floor(budget * APPROX_CHARS_PER_TOKEN));
+        sections = [{ ...sections[0], content: truncateText(sections[0].content, maxChars) }];
+        warnings.push({
+          kind: 'budget-truncated',
+          detail: 'Truncated the answer section content to fit the token budget.',
+        });
       }
 
       const answer = await this.nano.prompt(buildAnswerPrompt(query, sections));
@@ -150,12 +178,29 @@ export class Dispatcher {
     };
   }
 
-  private async decide(query: string, candidates: readonly Candidate[]): Promise<DispatcherDecision> {
+  private async decide(
+    query: string,
+    candidates: readonly Candidate[],
+    warnings: WrenWarning[],
+    opts: DispatcherOptions,
+  ): Promise<DispatcherDecision> {
     const toolsText = this.registry
       .list()
       .map((tool) => compressSchema(tool))
       .join('\n');
-    const prompt = buildDecisionPrompt(query, toolsText, candidates);
+    const budget = this.nano.quota.inputQuota * (opts.budgetRatio ?? DEFAULT_BUDGET_RATIO);
+
+    let current = [...candidates];
+    let prompt = buildDecisionPrompt(query, toolsText, current);
+    while (current.length > 1 && (await this.nano.estimateTokens(prompt)) > budget) {
+      current = current.slice(0, -1);
+      prompt = buildDecisionPrompt(query, toolsText, current);
+      warnings.push({
+        kind: 'budget-truncated',
+        detail: `Dropped a decision candidate to fit the token budget; ${current.length} remain.`,
+      });
+    }
+
     return this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA);
   }
 }
