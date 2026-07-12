@@ -1,3 +1,4 @@
+import { WrenStorageClosedError, WrenStorageUnsupportedError } from './errors.js';
 import { applyMigrations, type Migration, type SqlEngine } from './migrations.js';
 import { WorkerRpcClient } from './worker-rpc-client.js';
 
@@ -23,6 +24,10 @@ export class WrenStorage implements SqlEngine {
   }
 
   static async open(dbName: string, migrations: readonly Migration[] = []): Promise<WrenStorage> {
+    const reason = WrenStorage.unsupportedReason();
+    if (reason) {
+      throw new WrenStorageUnsupportedError(reason);
+    }
     const worker = new Worker(new URL('./worker/storage.worker.ts', import.meta.url), {
       type: 'module',
     });
@@ -31,6 +36,27 @@ export class WrenStorage implements SqlEngine {
     const storage = new WrenStorage(rpc, dbName);
     await applyMigrations(storage, migrations);
     return storage;
+  }
+
+  /**
+   * Checks for Worker support and OPFS root access
+   * (`navigator.storage.getDirectory`). Deliberately does not check for
+   * SharedArrayBuffer or cross-origin isolation: the SAHPool VFS this class
+   * uses does not need them, unlike the default `opfs` VFS. Verified against
+   * the SQLite Wasm project documentation as of the 3.53.0 release.
+   */
+  static isSupported(): boolean {
+    return WrenStorage.unsupportedReason() === undefined;
+  }
+
+  private static unsupportedReason(): string | undefined {
+    if (typeof Worker === 'undefined') {
+      return 'Worker is not available';
+    }
+    if (typeof navigator === 'undefined' || typeof navigator.storage?.getDirectory !== 'function') {
+      return 'the Origin Private File System (navigator.storage.getDirectory) is not available';
+    }
+    return undefined;
   }
 
   async exec(sql: string, params?: unknown[]): Promise<void> {
@@ -59,7 +85,7 @@ export class WrenStorage implements SqlEngine {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Error(`WrenStorage for "${this.dbName}" is closed`);
+      throw new WrenStorageClosedError(this.dbName);
     }
   }
 }
