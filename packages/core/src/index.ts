@@ -9,3 +9,5 @@ export {
 } from './storage/errors.js';
 export { RpcError } from './storage/rpc-protocol.js';
 
+export type { WrenDocument, WrenSection, WrenSourceType, WrenTreeNode } from './types.js';
+
