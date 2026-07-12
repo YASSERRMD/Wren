@@ -11,7 +11,7 @@ export default defineConfig({
       fileName: 'index',
     },
     rollupOptions: {
-      external: ['@angular/core', '@angular/common', 'rxjs'],
+      external: ['@angular/core', '@angular/common', 'rxjs', '@wren/core'],
     },
   },
   test: {
