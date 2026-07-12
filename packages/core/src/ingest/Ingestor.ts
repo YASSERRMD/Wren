@@ -2,7 +2,7 @@ import { DocumentRepository } from '../documents/DocumentRepository.js';
 import { CachingLabelGenerator } from '../labelling/CachingLabelGenerator.js';
 import { hashContent } from '../labelling/contentHash.js';
 import { createLabelGenerator, type LabelStrategy } from '../labelling/createLabelGenerator.js';
-import type { ProgressCallback } from '../labelling/progress.js';
+import type { IngestProgress, ProgressCallback } from '../labelling/progress.js';
 import type { WrenDocument } from '../types.js';
 import { parse } from './parse.js';
 import { DEFAULT_MAX_SECTION_CHARS, type ParseWarning, type WrenSource } from './types.js';
@@ -14,6 +14,13 @@ export interface IngestOptions {
   onProgress?: ProgressCallback;
   /** Overrides the stable id derived from the source; see deriveSourceId. */
   docId?: string;
+  signal?: AbortSignal;
+}
+
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('Ingest aborted', 'AbortError');
+  }
 }
 
 /**
@@ -48,11 +55,13 @@ export class Ingestor {
 
   async ingest(source: WrenSource, opts: IngestOptions = {}): Promise<IngestResult> {
     const start = Date.now();
+    checkAborted(opts.signal);
 
     const docId = opts.docId ?? (await deriveSourceId(source));
     const maxSectionChars = opts.maxSectionChars ?? DEFAULT_MAX_SECTION_CHARS;
     const parsed = parse(source, { maxSectionChars });
     opts.onProgress?.({ phase: 'parsing', current: 1, total: 1 });
+    checkAborted(opts.signal);
 
     // parse() generates its own random docId; the stable one just derived
     // (or the caller's explicit override) replaces it on every section.
@@ -60,7 +69,15 @@ export class Ingestor {
 
     const { generator, strategy } = await createLabelGenerator(opts.labeller ?? 'auto');
     const cachingGenerator = new CachingLabelGenerator(generator, this.repo);
-    const labelled = await cachingGenerator.generateLabels(sections, opts.onProgress);
+    // Checking the signal from inside onProgress, which the labeller calls
+    // synchronously after each section or batch, is what makes cancellation
+    // land between sections rather than only at the next big phase boundary.
+    const wrappedOnProgress = (progress: IngestProgress): void => {
+      checkAborted(opts.signal);
+      opts.onProgress?.(progress);
+    };
+    const labelled = await cachingGenerator.generateLabels(sections, wrappedOnProgress);
+    checkAborted(opts.signal);
 
     const existing = await this.repo.getDocument(docId);
     if (existing) {
