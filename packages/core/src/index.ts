@@ -45,3 +45,6 @@ export type { LabelCache } from './labelling/CachingLabelGenerator.js';
 export { createLabelGenerator } from './labelling/createLabelGenerator.js';
 export type { CreateLabelGeneratorResult, LabelStrategy } from './labelling/createLabelGenerator.js';
 
+export { Ingestor } from './ingest/Ingestor.js';
+export type { IngestOptions, IngestResult } from './ingest/Ingestor.js';
+
