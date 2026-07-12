@@ -1,16 +1,11 @@
-import type { Wren, WrenResponse } from '@wren/core';
+import type { Wren } from '@wren/core';
 import { Wren as WrenClass } from '@wren/core';
-import { EVAL_CASES, type EvalCase } from './cases.js';
+import { EVAL_CASES } from './cases.js';
 import { captureEnvironment } from './environment.js';
 import { FIXTURE_DOCUMENTS } from './fixtures/index.js';
+import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
 import { EVAL_TOOLS } from './tools.js';
 import { clearLog, log, onRunClick, setResultsHtml } from './ui.js';
-
-interface CaseResult {
-  evalCase: EvalCase;
-  response: WrenResponse;
-  routingCorrect: boolean;
-}
 
 async function ingestFixtures(wren: Wren): Promise<void> {
   for (const source of FIXTURE_DOCUMENTS) {
@@ -26,21 +21,53 @@ function registerTools(wren: Wren): void {
   }
 }
 
-async function runCases(wren: Wren): Promise<CaseResult[]> {
-  const results: CaseResult[] = [];
+async function runCases(wren: Wren): Promise<CaseOutcome[]> {
+  const outcomes: CaseOutcome[] = [];
   for (const evalCase of EVAL_CASES) {
     const response = await wren.query(evalCase.query);
-    const routingCorrect = response.action === evalCase.expectedAction;
-    results.push({ evalCase, response, routingCorrect });
-    log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${routingCorrect ? 'OK' : 'MISMATCH'}`);
+    const outcome = scoreCase(evalCase, response);
+    outcomes.push(outcome);
+    log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${outcome.routingCorrect ? 'OK' : 'MISMATCH'}`);
   }
-  return results;
+  return outcomes;
 }
 
-function renderResultsTable(results: CaseResult[]): string {
-  const rows = results
-    .map(
-      ({ evalCase, response, routingCorrect }) => `
+function formatPercent(value: number): string {
+  return Number.isNaN(value) ? 'n/a' : `${(value * 100).toFixed(0)}%`;
+}
+
+function renderSummary(summary: MetricsSummary): string {
+  const categoryRows = Object.entries(summary.byCategory)
+    .map(([category, { total, routingCorrect }]) => `<tr><td>${category}</td><td>${routingCorrect}/${total}</td></tr>`)
+    .join('');
+  const hopRows = Object.entries(summary.hopCounts)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([hops, count]) => `<tr><td>${hops}</td><td>${count}</td></tr>`)
+    .join('');
+
+  return `
+    <h2>Summary</h2>
+    <table>
+      <tbody>
+        <tr><td>Routing accuracy</td><td>${formatPercent(summary.routingAccuracy)} (${summary.totalCases} cases)</td></tr>
+        <tr><td>Retrieval accuracy</td><td>${formatPercent(summary.retrievalAccuracy)}</td></tr>
+        <tr><td>Tool selection accuracy</td><td>${formatPercent(summary.toolSelectionAccuracy)}</td></tr>
+      </tbody>
+    </table>
+    <h3>Routing by category</h3>
+    <table><thead><tr><th>Category</th><th>Correct</th></tr></thead><tbody>${categoryRows}</tbody></table>
+    <h3>Hop count distribution</h3>
+    <table><thead><tr><th>Hops</th><th>Cases</th></tr></thead><tbody>${hopRows}</tbody></table>`;
+}
+
+function formatOptionalBool(value: boolean | undefined): string {
+  if (value === undefined) return 'n/a';
+  return value ? 'yes' : 'no';
+}
+
+function renderCasesTable(outcomes: CaseOutcome[]): string {
+  const rows = outcomes
+    .map(({ evalCase, response, routingCorrect, retrievalCorrect, toolCorrect }) => `
       <tr style="background: ${routingCorrect ? '#eaffea' : '#ffecec'}">
         <td>${evalCase.id}</td>
         <td>${evalCase.category}</td>
@@ -48,14 +75,14 @@ function renderResultsTable(results: CaseResult[]): string {
         <td>${evalCase.expectedAction}</td>
         <td>${response.action}</td>
         <td>${response.hops}</td>
-      </tr>`,
-    )
+        <td>${formatOptionalBool(retrievalCorrect)}</td>
+        <td>${formatOptionalBool(toolCorrect)}</td>
+      </tr>`)
     .join('');
-  const passCount = results.filter((r) => r.routingCorrect).length;
   return `
-    <p><strong>Routing: ${passCount}/${results.length} correct.</strong> Full metrics land in a later commit.</p>
+    <h3>Cases</h3>
     <table>
-      <thead><tr><th>Case</th><th>Category</th><th>Query</th><th>Expected</th><th>Actual</th><th>Hops</th></tr></thead>
+      <thead><tr><th>Case</th><th>Category</th><th>Query</th><th>Expected</th><th>Actual</th><th>Hops</th><th>Retrieval</th><th>Tool</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -87,8 +114,9 @@ async function run(): Promise<void> {
   registerTools(wren);
 
   log(`Running ${EVAL_CASES.length} eval cases...`);
-  const results = await runCases(wren);
-  setResultsHtml(renderResultsTable(results));
+  const outcomes = await runCases(wren);
+  const summary = summarise(outcomes);
+  setResultsHtml(renderSummary(summary) + renderCasesTable(outcomes));
 
   await wren.destroy();
   log('Done.');
