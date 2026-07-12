@@ -9,11 +9,18 @@ import { DECISION_SCHEMA, type Citation, type DispatcherDecision, type WrenRespo
 export interface DispatcherOptions {
   /** Fraction of inputQuota a prompt may use before truncation kicks in, leaving headroom for output. */
   budgetRatio?: number;
+  signal?: AbortSignal;
 }
 
 const DEFAULT_BUDGET_RATIO = 0.7;
 /** Rough chars-per-token used only to size a last-resort content truncation; never trusted for the go/no-go budget decision itself, which always calls estimateTokens. */
 const APPROX_CHARS_PER_TOKEN = 4;
+
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('Dispatcher run aborted', 'AbortError');
+  }
+}
 
 function truncateText(text: string, maxChars: number): string {
   const trimmed = text.trim();
@@ -83,7 +90,7 @@ export class Dispatcher {
       return this.actAnswer(decision, query, hops, start, warnings, opts);
     }
     if (decision.action === 'tool') {
-      return this.actTool(decision, query, hops, start, warnings);
+      return this.actTool(decision, query, hops, start, warnings, opts);
     }
     return {
       answer: `No answer found: ${decision.reason}`,
@@ -120,8 +127,9 @@ export class Dispatcher {
 
     if (decision.action === 'tool') {
       const result = await this.registry.invoke(decision.tool, decision.args);
+      checkAborted(opts.signal);
       const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
-      yield* this.streamAnswer(prompt, (answer) => ({
+      yield* this.streamAnswer(prompt, opts, (answer) => ({
         answer,
         citations: [],
         action: 'tool',
@@ -146,7 +154,7 @@ export class Dispatcher {
       return;
     }
     const citations = sectionsToCitations(sections);
-    yield* this.streamAnswer(buildAnswerPrompt(query, sections), (answer) => ({
+    yield* this.streamAnswer(buildAnswerPrompt(query, sections), opts, (answer) => ({
       answer,
       citations,
       action: 'answer',
@@ -166,10 +174,13 @@ export class Dispatcher {
     candidates: Candidate[];
     hops: number;
   }> {
+    checkAborted(opts.signal);
     let candidates = await this.retriever.search(query);
+    checkAborted(opts.signal);
 
     let hops = 0;
     let decision = await this.decide(query, candidates, warnings, opts);
+    checkAborted(opts.signal);
 
     // Hop cap is a hard invariant, not a suggestion: a 3B model cannot be
     // trusted with open-ended multi-hop navigation. A first navigate is
@@ -189,7 +200,9 @@ export class Dispatcher {
       }
       hops += 1;
       candidates = await this.retriever.getChildren(decision.sectionId);
+      checkAborted(opts.signal);
       decision = await this.decide(query, candidates, warnings, opts);
+      checkAborted(opts.signal);
     }
 
     // The while condition above guarantees decision.action !== 'navigate'
@@ -221,7 +234,7 @@ export class Dispatcher {
       });
     }
 
-    return this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA);
+    return this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA, { signal: opts.signal });
   }
 
   /** Ordered truncation: drop whole sections first, then, only if a single remaining section is still too big, shorten its content. */
@@ -232,6 +245,7 @@ export class Dispatcher {
     opts: DispatcherOptions,
   ): Promise<WrenSection[]> {
     let sections = await this.repo.getSections(sectionIds);
+    checkAborted(opts.signal);
     if (sections.length === 0) return [];
 
     const budget = this.nano.quota.inputQuota * (opts.budgetRatio ?? DEFAULT_BUDGET_RATIO);
@@ -251,6 +265,7 @@ export class Dispatcher {
         detail: 'Truncated the answer section content to fit the token budget.',
       });
     }
+    checkAborted(opts.signal);
     return sections;
   }
 
@@ -274,7 +289,7 @@ export class Dispatcher {
       };
     }
 
-    const answer = await this.nano.prompt(buildAnswerPrompt(query, sections));
+    const answer = await this.nano.prompt(buildAnswerPrompt(query, sections), { signal: opts.signal });
 
     return {
       answer,
@@ -292,10 +307,13 @@ export class Dispatcher {
     hops: number,
     start: number,
     warnings: WrenWarning[],
+    opts: DispatcherOptions,
   ): Promise<WrenResponse> {
     const result = await this.registry.invoke(decision.tool, decision.args);
+    checkAborted(opts.signal);
+
     const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
-    const answer = await this.nano.prompt(prompt);
+    const answer = await this.nano.prompt(prompt, { signal: opts.signal });
 
     return {
       answer,
@@ -310,10 +328,11 @@ export class Dispatcher {
 
   private async *streamAnswer(
     prompt: string,
+    opts: DispatcherOptions,
     buildPartial: (accumulated: string) => Partial<WrenResponse>,
   ): AsyncGenerator<Partial<WrenResponse>> {
     let accumulated = '';
-    for await (const delta of this.nano.promptStreaming(prompt)) {
+    for await (const delta of this.nano.promptStreaming(prompt, { signal: opts.signal })) {
       accumulated += delta;
       yield buildPartial(accumulated);
     }
