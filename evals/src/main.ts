@@ -4,6 +4,7 @@ import { EVAL_CASES } from './cases.js';
 import { captureEnvironment } from './environment.js';
 import { FIXTURE_DOCUMENTS } from './fixtures/index.js';
 import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
+import { runToolCountSweep, type SweepStep } from './sweep.js';
 import { EVAL_TOOLS } from './tools.js';
 import { clearLog, log, onRunClick, setResultsHtml } from './ui.js';
 
@@ -18,10 +19,8 @@ async function ingestFixtures(wren: Wren): Promise<number[]> {
   return durationsMs;
 }
 
-function registerTools(wren: Wren): void {
-  for (const tool of EVAL_TOOLS) {
-    wren.registerTool(tool);
-  }
+function registerTools(wren: Wren): Array<() => void> {
+  return EVAL_TOOLS.map((tool) => wren.registerTool(tool));
 }
 
 async function runCases(wren: Wren): Promise<CaseOutcome[]> {
@@ -64,6 +63,16 @@ function renderSummary(summary: MetricsSummary): string {
     <table><thead><tr><th>Category</th><th>Correct</th></tr></thead><tbody>${categoryRows}</tbody></table>
     <h3>Hop count distribution</h3>
     <table><thead><tr><th>Hops</th><th>Cases</th></tr></thead><tbody>${hopRows}</tbody></table>`;
+}
+
+function renderSweepTable(steps: SweepStep[]): string {
+  const rows = steps
+    .map(({ toolCount, casesRun, toolSelectionAccuracy }) => `<tr><td>${toolCount}</td><td>${casesRun}</td><td>${formatPercent(toolSelectionAccuracy)}</td></tr>`)
+    .join('');
+  return `
+    <h3>Tool count sweep</h3>
+    <p>Validates the recommended cap of 7 against this corpus: accuracy should hold steady up to the cap and may degrade past it.</p>
+    <table><thead><tr><th>Tools registered</th><th>Cases run</th><th>Tool selection accuracy</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function formatOptionalBool(value: boolean | undefined): string {
@@ -117,12 +126,18 @@ async function run(): Promise<void> {
   const ingestDurationsMs = await ingestFixtures(wren);
 
   log(`Registering ${EVAL_TOOLS.length} tools...`);
-  registerTools(wren);
+  const unregisterFns = registerTools(wren);
 
   log(`Running ${EVAL_CASES.length} eval cases...`);
   const outcomes = await runCases(wren);
   const summary = summarise(outcomes, ingestDurationsMs);
-  setResultsHtml(renderSummary(summary) + renderCasesTable(outcomes));
+
+  for (const unregister of unregisterFns) unregister();
+
+  log('Running tool count sweep (3, 5, 7, 10 tools)...');
+  const sweepSteps = await runToolCountSweep(wren, log);
+
+  setResultsHtml(renderSummary(summary) + renderSweepTable(sweepSteps) + renderCasesTable(outcomes));
 
   await wren.destroy();
   log('Done.');
