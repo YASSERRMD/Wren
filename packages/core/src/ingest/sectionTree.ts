@@ -76,7 +76,7 @@ export function buildSectionTree(docId: string, title: string, events: Iterable<
   const appendContent = (text: string): void => {
     if (!text) return;
     const section = sectionsById.get(ensureOpenSection()) as WrenSection;
-    section.content += (section.content && !section.content.endsWith(' ') ? ' ' : '') + text;
+    section.content += (section.content && !/\s$/.test(section.content) ? ' ' : '') + text;
   };
 
   const markParagraphBreak = (): void => {
