@@ -1,0 +1,17 @@
+{
+  "name": "@wren/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@wren/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.1.4"
+  }
+}

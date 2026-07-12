@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "evals",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@wren/evals", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

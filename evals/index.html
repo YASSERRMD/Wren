@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wren Eval Harness</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 860px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+      #status {
+        white-space: pre-wrap;
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        background: #f4f4f4;
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-top: 1rem;
+        min-height: 2rem;
+      }
+      #results {
+        margin-top: 1rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+        font-size: 0.9rem;
+      }
+      th {
+        background: #f4f4f4;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Wren Eval Harness</h1>
+    <p>
+      Runs Wren's dispatcher against a fixed fixture corpus and a set of
+      eval cases, using this browser's real Gemini Nano. Needs to run
+      here, not in a Node test: it needs a real model.
+    </p>
+    <button id="run">Run evals</button>
+    <div id="status"></div>
+    <div id="results"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
