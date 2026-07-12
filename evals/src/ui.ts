@@ -1,6 +1,7 @@
 const statusEl = document.querySelector<HTMLDivElement>('#status');
 const resultsEl = document.querySelector<HTMLDivElement>('#results');
 const runButton = document.querySelector<HTMLButtonElement>('#run');
+const downloadButton = document.querySelector<HTMLButtonElement>('#download');
 
 export function log(message: string): void {
   if (!statusEl) return;
@@ -20,6 +21,7 @@ export function onRunClick(handler: () => Promise<void>): void {
   runButton?.addEventListener('click', () => {
     void (async () => {
       if (runButton) runButton.disabled = true;
+      if (downloadButton) downloadButton.hidden = true;
       try {
         await handler();
       } finally {
@@ -27,4 +29,11 @@ export function onRunClick(handler: () => Promise<void>): void {
       }
     })();
   });
+}
+
+/** Reveals the download button and wires it to produce this run's report; replaces any previous run's handler. */
+export function showDownloadButton(onDownload: () => void): void {
+  if (!downloadButton) return;
+  downloadButton.hidden = false;
+  downloadButton.onclick = onDownload;
 }

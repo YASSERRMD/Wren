@@ -4,9 +4,10 @@ import { EVAL_CASES } from './cases.js';
 import { captureEnvironment } from './environment.js';
 import { FIXTURE_DOCUMENTS } from './fixtures/index.js';
 import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
+import { buildReport, downloadReport } from './report.js';
 import { runToolCountSweep, type SweepStep } from './sweep.js';
 import { EVAL_TOOLS } from './tools.js';
-import { clearLog, log, onRunClick, setResultsHtml } from './ui.js';
+import { clearLog, log, onRunClick, setResultsHtml, showDownloadButton } from './ui.js';
 
 async function ingestFixtures(wren: Wren): Promise<number[]> {
   const durationsMs: number[] = [];
@@ -138,6 +139,9 @@ async function run(): Promise<void> {
   const sweepSteps = await runToolCountSweep(wren, log);
 
   setResultsHtml(renderSummary(summary) + renderSweepTable(sweepSteps) + renderCasesTable(outcomes));
+
+  const report = buildReport(env, summary, sweepSteps, outcomes);
+  showDownloadButton(() => downloadReport(report));
 
   await wren.destroy();
   log('Done.');
