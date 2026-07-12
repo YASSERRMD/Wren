@@ -40,6 +40,18 @@ function sectionsToCitations(sections: readonly WrenSection[]): Citation[] {
   }));
 }
 
+function buildToolFollowupPrompt(
+  query: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  result: string,
+): string {
+  return (
+    `Query: "${query}"\n\nTool "${toolName}" was called with ${JSON.stringify(args)} and returned:\n${result}` +
+    '\n\nAnswer the query using this result.'
+  );
+}
+
 /**
  * The heart of Wren: BM25 prefilter, one constrained Nano call to decide,
  * execute, answer. Every query goes through here. See DECISION_SCHEMA for
@@ -89,6 +101,22 @@ export class Dispatcher {
         answer,
         citations: sectionsToCitations(sections),
         action: 'answer',
+        hops: 0,
+        durationMs: Date.now() - start,
+        warnings,
+      };
+    }
+
+    if (decision.action === 'tool') {
+      const result = await this.registry.invoke(decision.tool, decision.args);
+      const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
+      const answer = await this.nano.prompt(prompt);
+
+      return {
+        answer,
+        citations: [],
+        action: 'tool',
+        toolCall: { name: decision.tool, args: decision.args, result: result.content },
         hops: 0,
         durationMs: Date.now() - start,
         warnings,
