@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, NgZone, inject, signal } from '@angular/core';
 import { Wren, type IngestOptions, type IngestProgress, type IngestResult, type WrenDocument, type WrenResponse, type WrenSource, type WrenTool } from '@wren/core';
 import { Observable } from 'rxjs';
 import { WREN_OPTIONS } from './wren-options.js';
@@ -20,6 +20,7 @@ export type WrenStatus = 'initialising' | 'ready' | 'unsupported' | 'error';
 @Injectable({ providedIn: 'root' })
 export class WrenService {
   private readonly options = inject(WREN_OPTIONS, { optional: true }) ?? {};
+  private readonly ngZone = inject(NgZone);
 
   private readonly wrenSignal = signal<Wren | null>(null);
   private readonly statusSignal = signal<WrenStatus>('initialising');
@@ -47,17 +48,22 @@ export class WrenService {
     try {
       const support = await Wren.isSupported();
       if (!support.storage) {
-        this.statusSignal.set('unsupported');
+        this.ngZone.run(() => this.statusSignal.set('unsupported'));
         return;
       }
       const wren = await Wren.create(this.options);
-      this.wrenSignal.set(wren);
-      this.flushPendingTools(wren);
-      this.statusSignal.set('ready');
+      this.ngZone.run(() => {
+        this.wrenSignal.set(wren);
+        this.flushPendingTools(wren);
+        this.statusSignal.set('ready');
+      });
       await this.refreshDocuments();
     } catch (error) {
-      this.errorSignal.set(error instanceof Error ? error : new Error(String(error)));
-      this.statusSignal.set('error');
+      const normalised = error instanceof Error ? error : new Error(String(error));
+      this.ngZone.run(() => {
+        this.errorSignal.set(normalised);
+        this.statusSignal.set('error');
+      });
     }
   }
 
@@ -87,26 +93,27 @@ export class WrenService {
   async ingest(source: WrenSource, opts: IngestOptions = {}): Promise<IngestResult | undefined> {
     const wren = this.wrenSignal();
     if (!wren) return undefined;
-    this.ingestProgressSignal.set(undefined);
+    this.ngZone.run(() => this.ingestProgressSignal.set(undefined));
     try {
       const result = await wren.ingest(source, {
         ...opts,
         onProgress: (progress) => {
-          this.ingestProgressSignal.set(progress);
+          this.ngZone.run(() => this.ingestProgressSignal.set(progress));
           opts.onProgress?.(progress);
         },
       });
       await this.refreshDocuments();
       return result;
     } finally {
-      this.ingestProgressSignal.set(undefined);
+      this.ngZone.run(() => this.ingestProgressSignal.set(undefined));
     }
   }
 
   async refreshDocuments(): Promise<void> {
     const wren = this.wrenSignal();
     if (!wren) return;
-    this.documentsSignal.set(await wren.listDocuments());
+    const documents = await wren.listDocuments();
+    this.ngZone.run(() => this.documentsSignal.set(documents));
   }
 
   async deleteDocument(id: string): Promise<void> {
@@ -128,11 +135,13 @@ export class WrenService {
       wren
         .query(text, { signal: controller.signal })
         .then((response) => {
-          subscriber.next(response);
-          subscriber.complete();
+          this.ngZone.run(() => {
+            subscriber.next(response);
+            subscriber.complete();
+          });
         })
         .catch((error: unknown) => {
-          if (!controller.signal.aborted) subscriber.error(error);
+          if (!controller.signal.aborted) this.ngZone.run(() => subscriber.error(error));
         });
       return () => controller.abort();
     });
@@ -150,11 +159,11 @@ export class WrenService {
       (async () => {
         try {
           for await (const partial of wren.queryStreaming(text, { signal: controller.signal })) {
-            subscriber.next(partial);
+            this.ngZone.run(() => subscriber.next(partial));
           }
-          subscriber.complete();
+          this.ngZone.run(() => subscriber.complete());
         } catch (error) {
-          if (!controller.signal.aborted) subscriber.error(error);
+          if (!controller.signal.aborted) this.ngZone.run(() => subscriber.error(error));
         }
       })();
       return () => controller.abort();
