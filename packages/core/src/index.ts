@@ -51,3 +51,5 @@ export type { IngestOptions, IngestResult } from './ingest/Ingestor.js';
 export { LexicalRetriever } from './retrieval/LexicalRetriever.js';
 export type { Candidate, LexicalSearchOptions } from './retrieval/LexicalRetriever.js';
 
+export type { WrenTool, WrenToolResult } from './tools/WrenTool.js';
+
