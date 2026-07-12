@@ -53,4 +53,5 @@ export type { Candidate, LexicalSearchOptions } from './retrieval/LexicalRetriev
 
 export type { WrenTool, WrenToolResult } from './tools/WrenTool.js';
 export { ToolNameError, ToolRegistry } from './tools/ToolRegistry.js';
+export { compressSchema } from './tools/compressSchema.js';
 
