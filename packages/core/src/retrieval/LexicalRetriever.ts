@@ -19,8 +19,19 @@ const DEFAULT_LIMIT = 8;
 /** heading and label columns weighted above content: a match in the label is a stronger signal than one deep in body text. */
 const BM25_WEIGHTS = '3.0, 1.0, 3.0';
 
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'not', 'of', 'to', 'in', 'is', 'it', 'for',
+  'on', 'with', 'as', 'this', 'that', 'be', 'are', 'was', 'were', 'at', 'by',
+]);
+
+/**
+ * Kept deliberately dumb: drops stopwords, and nothing more. No stemming
+ * beyond what the porter tokenizer already does, no synonym expansion.
+ * Resist adding either.
+ */
 function tokenize(query: string): string[] {
-  return query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const terms = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return terms.filter((term) => !STOPWORDS.has(term));
 }
 
 /**
@@ -30,11 +41,17 @@ function tokenize(query: string): string[] {
  * trying to escape it, since only alphanumeric characters survive
  * tokenisation and each surviving term is wrapped as a literal phrase. A
  * user typing NOT should not silently become a boolean operator.
+ *
+ * Terms are OR'd rather than AND'd: requiring every term to appear was too
+ * restrictive once stopwords could no longer pad out an AND chain, and
+ * bm25's own ranking already rewards rows matching more terms over rows
+ * matching fewer, so OR does not mean "anything goes", just "don't
+ * silently exclude a partial match".
  */
 function buildMatchExpression(query: string): string | undefined {
   const terms = tokenize(query);
   if (terms.length === 0) return undefined;
-  return terms.map((term) => `"${term}"`).join(' ');
+  return terms.map((term) => `"${term}"`).join(' OR ');
 }
 
 interface SectionRow {
