@@ -7,12 +7,15 @@ import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './m
 import { EVAL_TOOLS } from './tools.js';
 import { clearLog, log, onRunClick, setResultsHtml } from './ui.js';
 
-async function ingestFixtures(wren: Wren): Promise<void> {
+async function ingestFixtures(wren: Wren): Promise<number[]> {
+  const durationsMs: number[] = [];
   for (const source of FIXTURE_DOCUMENTS) {
     const result = await wren.ingest(source);
     const warningNote = result?.warnings.length ? `, ${result.warnings.length} warning(s)` : '';
     log(`  ingested "${source.title}": ${result?.sectionCount ?? 0} sections${warningNote}`);
+    if (result) durationsMs.push(result.durationMs);
   }
+  return durationsMs;
 }
 
 function registerTools(wren: Wren): void {
@@ -52,6 +55,9 @@ function renderSummary(summary: MetricsSummary): string {
         <tr><td>Routing accuracy</td><td>${formatPercent(summary.routingAccuracy)} (${summary.totalCases} cases)</td></tr>
         <tr><td>Retrieval accuracy</td><td>${formatPercent(summary.retrievalAccuracy)}</td></tr>
         <tr><td>Tool selection accuracy</td><td>${formatPercent(summary.toolSelectionAccuracy)}</td></tr>
+        <tr><td>Budget truncation rate</td><td>${formatPercent(summary.budgetTruncationRate)}</td></tr>
+        <tr><td>Query latency (p50 / p95)</td><td>${summary.queryLatency.p50.toFixed(0)}ms / ${summary.queryLatency.p95.toFixed(0)}ms</td></tr>
+        <tr><td>Ingest latency (p50 / p95)</td><td>${summary.ingestLatency.p50.toFixed(0)}ms / ${summary.ingestLatency.p95.toFixed(0)}ms</td></tr>
       </tbody>
     </table>
     <h3>Routing by category</h3>
@@ -108,14 +114,14 @@ async function run(): Promise<void> {
   await wren.clear();
 
   log(`Ingesting ${FIXTURE_DOCUMENTS.length} fixture documents...`);
-  await ingestFixtures(wren);
+  const ingestDurationsMs = await ingestFixtures(wren);
 
   log(`Registering ${EVAL_TOOLS.length} tools...`);
   registerTools(wren);
 
   log(`Running ${EVAL_CASES.length} eval cases...`);
   const outcomes = await runCases(wren);
-  const summary = summarise(outcomes);
+  const summary = summarise(outcomes, ingestDurationsMs);
   setResultsHtml(renderSummary(summary) + renderCasesTable(outcomes));
 
   await wren.destroy();
