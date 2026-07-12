@@ -14,6 +14,8 @@ export interface JsonSchema {
   properties?: Record<string, JsonSchema>;
   required?: readonly string[];
   items?: JsonSchema;
+  minItems?: number;
+  maxItems?: number;
   oneOf?: readonly JsonSchema[];
 }
 
@@ -62,8 +64,13 @@ export function matchesSchema(value: unknown, schema: JsonSchema): boolean {
       }
     }
   }
-  if (schema.type === 'array' && schema.items) {
-    return (value as unknown[]).every((item) => matchesSchema(item, schema.items as JsonSchema));
+  if (schema.type === 'array') {
+    const arr = value as unknown[];
+    if (schema.minItems !== undefined && arr.length < schema.minItems) return false;
+    if (schema.maxItems !== undefined && arr.length > schema.maxItems) return false;
+    if (schema.items) {
+      return arr.every((item) => matchesSchema(item, schema.items as JsonSchema));
+    }
   }
   return true;
 }
