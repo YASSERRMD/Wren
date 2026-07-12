@@ -37,4 +37,5 @@ export { DEFAULT_MAX_SECTION_CHARS } from './ingest/types.js';
 
 export type { LabelGenerator } from './labelling/LabelGenerator.js';
 export type { IngestProgress, ProgressCallback } from './labelling/progress.js';
+export { HeuristicLabeller } from './labelling/HeuristicLabeller.js';
 
