@@ -55,3 +55,6 @@ export type { WrenTool, WrenToolResult } from './tools/WrenTool.js';
 export { ToolNameError, ToolRegistry } from './tools/ToolRegistry.js';
 export { compressSchema } from './tools/compressSchema.js';
 
+export type { Citation, DispatcherDecision, WrenResponse, WrenWarning } from './dispatcher/types.js';
+export { DECISION_SCHEMA } from './dispatcher/types.js';
+
