@@ -7,6 +7,13 @@ import type {
 } from './language-model.js';
 import { matchesSchema, type JsonSchema } from './validateSchema.js';
 
+export interface NanoQuota {
+  /** Remaining budget available for new input: contextWindow minus current usage. */
+  inputQuota: number;
+  contextWindow: number;
+  usage: number;
+}
+
 export class NanoAdapter {
   private overflowed = false;
   private readonly onContextOverflow = (): void => {
@@ -66,6 +73,32 @@ export class NanoAdapter {
       throw new WrenSchemaError('Nano response did not match the expected schema', raw);
     }
     return parsed as T;
+  }
+
+  /**
+   * Estimates token cost via the session's own measurement, falling back to
+   * a character-based heuristic (roughly 4 characters per token for
+   * English text) when neither is exposed. Prefers measureContextUsage,
+   * the current API name; measureInputUsage is the obsolete alias some
+   * Chrome builds may still carry.
+   */
+  async estimateTokens(text: string): Promise<number> {
+    const measure = this.session.measureContextUsage ?? this.session.measureInputUsage;
+    if (measure) {
+      return measure.call(this.session, text);
+    }
+    return Math.ceil(text.length / 4);
+  }
+
+  /** Read live from the session on every access, never hard-coded. */
+  get quota(): NanoQuota {
+    const contextWindow = this.session.contextWindow ?? this.session.inputQuota ?? 0;
+    const usage = this.session.contextUsage ?? this.session.inputUsage ?? 0;
+    return {
+      contextWindow,
+      usage,
+      inputQuota: Math.max(0, contextWindow - usage),
+    };
   }
 
   destroy(): void {
