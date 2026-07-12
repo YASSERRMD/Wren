@@ -4,9 +4,12 @@ import { createLabelGenerator, type LabelStrategy } from '../labelling/createLab
 import type { ProgressCallback } from '../labelling/progress.js';
 import type { WrenDocument } from '../types.js';
 import { parse } from './parse.js';
-import type { ParseWarning, WrenSource } from './types.js';
+import { DEFAULT_MAX_SECTION_CHARS, type ParseWarning, type WrenSource } from './types.js';
 
 export interface IngestOptions {
+  /** Default 'auto': Nano if available, heuristic otherwise. See createLabelGenerator. */
+  labeller?: LabelStrategy | 'auto';
+  maxSectionChars?: number;
   onProgress?: ProgressCallback;
 }
 
@@ -25,10 +28,11 @@ export class Ingestor {
   async ingest(source: WrenSource, opts: IngestOptions = {}): Promise<IngestResult> {
     const start = Date.now();
 
-    const parsed = parse(source);
+    const maxSectionChars = opts.maxSectionChars ?? DEFAULT_MAX_SECTION_CHARS;
+    const parsed = parse(source, { maxSectionChars });
     opts.onProgress?.({ phase: 'parsing', current: 1, total: 1 });
 
-    const { generator, strategy } = await createLabelGenerator('auto');
+    const { generator, strategy } = await createLabelGenerator(opts.labeller ?? 'auto');
     const cachingGenerator = new CachingLabelGenerator(generator, this.repo);
     const labelled = await cachingGenerator.generateLabels(parsed.sections, opts.onProgress);
 
