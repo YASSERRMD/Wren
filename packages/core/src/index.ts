@@ -42,4 +42,6 @@ export { NanoLabeller } from './labelling/NanoLabeller.js';
 export { hashContent } from './labelling/contentHash.js';
 export { CachingLabelGenerator } from './labelling/CachingLabelGenerator.js';
 export type { LabelCache } from './labelling/CachingLabelGenerator.js';
+export { createLabelGenerator } from './labelling/createLabelGenerator.js';
+export type { CreateLabelGeneratorResult, LabelStrategy } from './labelling/createLabelGenerator.js';
 
