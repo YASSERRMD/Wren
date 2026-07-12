@@ -122,4 +122,94 @@ describe('Dispatcher', () => {
       expect(response.citations).toEqual([]);
     });
   });
+
+  describe('hop cap', () => {
+    beforeEach(async () => {
+      await repo.insertSections([
+        section({ id: 'parent', heading: 'Parent', content: 'find the detail here', label: 'Overview section' }),
+        section({ id: 'child', parentId: 'parent', depth: 1, heading: 'Child', content: 'the actual detail content', label: 'Detail section' }),
+      ]);
+    });
+
+    it('forces an answer on the best remaining candidate when a second navigate is attempted', async () => {
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'navigate', sectionId: 'parent' }),
+        JSON.stringify({ action: 'navigate', sectionId: 'child' }),
+        'Here is the detail.',
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      const response = await dispatcher.run('detail');
+
+      expect(response.hops).toBe(1);
+      expect(response.action).toBe('answer');
+      expect(response.answer).toBe('Here is the detail.');
+      expect(response.citations).toEqual([{ sectionId: 'child', heading: 'Child', snippet: 'the actual detail content' }]);
+      expect(response.warnings).toContainEqual(
+        expect.objectContaining({ kind: 'hop-cap-forced' }),
+      );
+      expect(nano.callLog).toHaveLength(3);
+    });
+
+    it('coerces to a none action when a second navigate is attempted with no candidates to fall back on', async () => {
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'navigate', sectionId: 'child' }),
+        JSON.stringify({ action: 'navigate', sectionId: 'does-not-exist' }),
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      // 'child' has no children of its own, so the second navigate hop's
+      // candidate list is empty and there is nothing left to fall back on.
+      const response = await dispatcher.run('detail');
+
+      expect(response.hops).toBe(1);
+      expect(response.action).toBe('none');
+      expect(response.answer).toBe('No answer found: Navigation was exhausted with no candidates left to answer from.');
+      expect(response.warnings).toContainEqual(
+        expect.objectContaining({ kind: 'hop-cap-forced' }),
+      );
+    });
+  });
+
+  describe('budget truncation', () => {
+    it('drops decision candidates from the end until the prompt fits the budget', async () => {
+      await repo.insertSections([
+        section({ id: 'a', heading: 'Widget A', content: 'a widget', label: 'First widget' }),
+        section({ id: 'b', ordinal: 1, heading: 'Widget B', content: 'a widget', label: 'Second widget' }),
+        section({ id: 'c', ordinal: 2, heading: 'Widget C', content: 'a widget', label: 'Third widget' }),
+      ]);
+      const nano = new MockNanoAdapter([JSON.stringify({ action: 'none', reason: 'stop here' })]);
+      nano.setQuota({ inputQuota: 50, contextWindow: 50, usage: 0 });
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      const response = await dispatcher.run('widget');
+
+      expect(response.warnings).toContainEqual(
+        expect.objectContaining({ kind: 'budget-truncated' }),
+      );
+      const decisionPrompt = nano.callLog[0].input;
+      const idsPresent = ['a', 'b', 'c'].filter((id) => decisionPrompt.includes(`${id}:`));
+      expect(idsPresent).toHaveLength(1);
+    });
+
+    it('truncates a single remaining section content when it alone still exceeds the budget', async () => {
+      const hugeContent = 'x'.repeat(5000);
+      await repo.insertSections([section({ id: 's1', heading: 'Huge', content: hugeContent, label: 'A very long section' })]);
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'answer', sectionIds: ['s1'] }),
+        'Short answer.',
+      ]);
+      nano.setQuota({ inputQuota: 100, contextWindow: 100, usage: 0 });
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      const response = await dispatcher.run('huge');
+
+      expect(response.answer).toBe('Short answer.');
+      expect(response.warnings).toContainEqual(
+        expect.objectContaining({ detail: 'Truncated the answer section content to fit the token budget.' }),
+      );
+      const answerPrompt = nano.callLog[1].input;
+      expect(answerPrompt.length).toBeLessThan(hugeContent.length);
+    });
+  });
 });
