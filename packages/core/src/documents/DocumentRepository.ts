@@ -49,6 +49,19 @@ function rowToDocument(row: DocumentRow): WrenDocument {
   };
 }
 
+function rowToSection(row: SectionRow): WrenSection {
+  return {
+    id: row.id,
+    docId: row.doc_id,
+    parentId: row.parent_id,
+    ordinal: row.ordinal,
+    depth: row.depth,
+    heading: row.heading,
+    content: row.content,
+    label: row.label,
+  };
+}
+
 /**
  * Assembles a flat row list into a tree. Since a document may have more
  * than one top-level (parentless) section, this returns a synthetic root
@@ -173,6 +186,22 @@ export class DocumentRepository {
   async listDocuments(): Promise<WrenDocument[]> {
     const rows = await this.engine.query<DocumentRow>('SELECT * FROM documents ORDER BY created_at');
     return rows.map(rowToDocument);
+  }
+
+  /**
+   * Full sections (including content) by id, in no particular order. The
+   * dispatcher (Phase 10) uses this for the answer step: candidates carry
+   * only a snippet, never full content, so the chosen sections' full text
+   * has to be fetched separately once a decision is made.
+   */
+  async getSections(ids: readonly string[]): Promise<WrenSection[]> {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = await this.engine.query<SectionRow>(
+      `SELECT * FROM sections WHERE id IN (${placeholders})`,
+      [...ids],
+    );
+    return rows.map(rowToSection);
   }
 
   async getTree(docId: string): Promise<WrenTreeNode> {
