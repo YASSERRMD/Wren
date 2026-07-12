@@ -63,6 +63,23 @@ interface SectionRow {
   label: string;
 }
 
+function truncate(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trim()}...`;
+}
+
+/** No search happened, so there is no bm25 score: 0 is the neutral value, and the snippet is a plain truncation. */
+function rowToCandidate(row: SectionRow): Candidate {
+  return {
+    sectionId: row.id,
+    docId: row.doc_id,
+    heading: row.heading,
+    label: row.label,
+    score: 0,
+    snippet: truncate(row.content, 200),
+  };
+}
+
 /** The BM25 prefilter: cheap, no LLM, and does most of the actual retrieval work. */
 export class LexicalRetriever {
   constructor(private readonly engine: SqlEngine) {}
@@ -114,5 +131,30 @@ export class LexicalRetriever {
         score: row.score,
         snippet: row.snippet,
       }));
+  }
+
+  /** The dispatcher's navigate hop: fetches a section's direct children as candidates for the next decision round. */
+  async getChildren(sectionId: string): Promise<Candidate[]> {
+    const rows = await this.engine.query<SectionRow>(
+      'SELECT id, doc_id, parent_id, heading, content, label FROM sections WHERE parent_id = ? ORDER BY ordinal',
+      [sectionId],
+    );
+    return rows.map(rowToCandidate);
+  }
+
+  async getSiblings(sectionId: string): Promise<Candidate[]> {
+    const [section] = await this.engine.query<SectionRow>(
+      'SELECT id, doc_id, parent_id, heading, content, label FROM sections WHERE id = ?',
+      [sectionId],
+    );
+    if (!section) return [];
+
+    const rows = await this.engine.query<SectionRow>(
+      // IS, not =, so top-level sections (parent_id IS NULL) match their
+      // other top-level siblings correctly rather than matching nothing.
+      'SELECT id, doc_id, parent_id, heading, content, label FROM sections WHERE parent_id IS ? AND id != ? ORDER BY ordinal',
+      [section.parent_id, sectionId],
+    );
+    return rows.map(rowToCandidate);
   }
 }
