@@ -8,3 +8,5 @@ export { useWren } from './useWren.js';
 export { useTool } from './useTool.js';
 export { useQuery } from './useQuery.js';
 export type { UseQueryResult } from './useQuery.js';
+export { useStreamingQuery } from './useStreamingQuery.js';
+export type { UseStreamingQueryResult } from './useStreamingQuery.js';
