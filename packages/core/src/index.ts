@@ -17,3 +17,6 @@ export {
   SectionDepthError,
 } from './documents/DocumentRepository.js';
 
+export { NanoAdapter } from './nano/NanoAdapter.js';
+export type { NanoAvailability } from './nano/language-model.js';
+
