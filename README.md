@@ -36,6 +36,15 @@ Gemini Nano, WebMCP, and vectorless retrieval.
 - Chrome desktop with the Prompt API and the on-device Nano model available.
 - The WebMCP origin trial or flag, for the tool bridge to external agents.
   Wren's own dispatcher works without it.
+- No Cross-Origin-Opener-Policy or Cross-Origin-Embedder-Policy headers are
+  required for storage. `WrenStorage` uses the OPFS SAHPool VFS, which does
+  not rely on SharedArrayBuffer or Atomics.wait the way the default `opfs`
+  VFS does. It does need to run in a Worker, since
+  `FileSystemFileHandle.createSyncAccessHandle()` is only available there,
+  not on the main UI thread. Verified against the SQLite Wasm project
+  documentation and confirmed with a real cross-navigation persistence test
+  in Chrome, since Node and jsdom-style test environments cannot exercise
+  OPFS at all.
 
 ## Packages
 
