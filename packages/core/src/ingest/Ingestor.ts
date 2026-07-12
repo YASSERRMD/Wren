@@ -103,4 +103,17 @@ export class Ingestor {
       durationMs: Date.now() - start,
     };
   }
+
+  /**
+   * Re-runs FTS population without re-parsing or re-labelling. Needed
+   * after a schema migration. docId is accepted for API consistency and
+   * future filtering, but the current implementation rebuilds the whole
+   * index (see DocumentRepository.rebuildFtsIndex): FTS5's external-content
+   * rebuild does not support filtering by document, and a full rebuild is
+   * cheap at Wren's target scale.
+   */
+  async reindex(docId: string): Promise<void> {
+    void docId;
+    await this.repo.rebuildFtsIndex();
+  }
 }

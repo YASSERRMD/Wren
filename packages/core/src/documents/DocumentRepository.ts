@@ -114,6 +114,18 @@ export class DocumentRepository {
     }
   }
 
+  /**
+   * Rebuilds the FTS5 index from the current contents of `sections` via
+   * the external-content table's documented 'rebuild' command, without
+   * touching documents or sections themselves. Useful after a schema
+   * migration. Rebuilds the whole index rather than filtering by document,
+   * since FTS5's external-content rebuild does not support that; cheap
+   * enough at Wren's target scale (small, page-scale corpora).
+   */
+  async rebuildFtsIndex(): Promise<void> {
+    await this.engine.exec("INSERT INTO sections_fts(sections_fts) VALUES ('rebuild')");
+  }
+
   private async insertDocumentRow(doc: WrenDocument): Promise<void> {
     await this.engine.exec(
       'INSERT INTO documents (id, title, source_type, created_at, meta) VALUES (?, ?, ?, ?, ?)',
