@@ -101,6 +101,27 @@ export class NanoAdapter {
     };
   }
 
+  /**
+   * Creating a session is expensive, so the intended pattern is to hold one
+   * long-lived NanoAdapter and call clone() to get an isolated copy per
+   * request, so unrelated calls do not accumulate shared context. Uses
+   * session.clone() where available; recreates via LanguageModel.create()
+   * if this Chrome build does not expose it. Documented per Phase 4's
+   * requirement to record which path was used and why, rather than leaving
+   * callers to guess whether isolation actually happened.
+   */
+  async clone(): Promise<NanoAdapter> {
+    if (this.session.clone) {
+      const cloned = await this.session.clone();
+      return new NanoAdapter(cloned);
+    }
+    if (typeof LanguageModel === 'undefined') {
+      throw new WrenNanoUnavailableError('LanguageModel is not present in this browser');
+    }
+    const recreated = await LanguageModel.create();
+    return new NanoAdapter(recreated);
+  }
+
   destroy(): void {
     this.session.removeEventListener('contextoverflow', this.onContextOverflow);
     this.session.destroy();
