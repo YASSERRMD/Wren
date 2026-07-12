@@ -68,28 +68,56 @@ export class Dispatcher {
   async run(query: string): Promise<WrenResponse> {
     const start = Date.now();
     const warnings: WrenWarning[] = [];
-    const candidates = await this.retriever.search(query);
-    const decision = await this.decide(query, candidates);
+    let candidates = await this.retriever.search(query);
 
-    if (decision.action === 'none') {
+    let hops = 0;
+    let decision = await this.decide(query, candidates);
+
+    // Hop cap is a hard invariant, not a suggestion: a 3B model cannot be
+    // trusted with open-ended multi-hop navigation. A first navigate is
+    // allowed; a second is a model failure, logged and forced to answer.
+    while (decision.action === 'navigate') {
+      if (hops >= 1) {
+        console.warn('Wren: Nano attempted a second navigate hop; forcing an answer instead.');
+        warnings.push({
+          kind: 'hop-cap-forced',
+          detail: 'A second navigate hop was attempted and forced to answer on the best candidate instead.',
+        });
+        decision =
+          candidates.length > 0
+            ? { action: 'answer', sectionIds: [candidates[0].sectionId] }
+            : { action: 'none', reason: 'Navigation was exhausted with no candidates left to answer from.' };
+        break;
+      }
+      hops += 1;
+      candidates = await this.retriever.getChildren(decision.sectionId);
+      decision = await this.decide(query, candidates);
+    }
+
+    // The while condition above guarantees decision.action !== 'navigate'
+    // here; TypeScript cannot see that across the loop's own reassignments,
+    // so this is a narrow, deliberate assertion of that runtime invariant.
+    const resolved = decision as Exclude<DispatcherDecision, { action: 'navigate' }>;
+
+    if (resolved.action === 'none') {
       return {
-        answer: `No answer found: ${decision.reason}`,
+        answer: `No answer found: ${resolved.reason}`,
         citations: [],
         action: 'none',
-        hops: 0,
+        hops,
         durationMs: Date.now() - start,
         warnings,
       };
     }
 
-    if (decision.action === 'answer') {
-      const sections = await this.repo.getSections(decision.sectionIds);
+    if (resolved.action === 'answer') {
+      const sections = await this.repo.getSections(resolved.sectionIds);
       if (sections.length === 0) {
         return {
           answer: 'No answer found: the chosen sections could not be located.',
           citations: [],
           action: 'none',
-          hops: 0,
+          hops,
           durationMs: Date.now() - start,
           warnings,
         };
@@ -101,29 +129,25 @@ export class Dispatcher {
         answer,
         citations: sectionsToCitations(sections),
         action: 'answer',
-        hops: 0,
+        hops,
         durationMs: Date.now() - start,
         warnings,
       };
     }
 
-    if (decision.action === 'tool') {
-      const result = await this.registry.invoke(decision.tool, decision.args);
-      const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
-      const answer = await this.nano.prompt(prompt);
+    const result = await this.registry.invoke(resolved.tool, resolved.args);
+    const prompt = buildToolFollowupPrompt(query, resolved.tool, resolved.args, result.content);
+    const answer = await this.nano.prompt(prompt);
 
-      return {
-        answer,
-        citations: [],
-        action: 'tool',
-        toolCall: { name: decision.tool, args: decision.args, result: result.content },
-        hops: 0,
-        durationMs: Date.now() - start,
-        warnings,
-      };
-    }
-
-    throw new Error(`Dispatcher action "${decision.action}" is not yet implemented`);
+    return {
+      answer,
+      citations: [],
+      action: 'tool',
+      toolCall: { name: resolved.tool, args: resolved.args, result: result.content },
+      hops,
+      durationMs: Date.now() - start,
+      warnings,
+    };
   }
 
   private async decide(query: string, candidates: readonly Candidate[]): Promise<DispatcherDecision> {
