@@ -1,5 +1,15 @@
 import type { SqlEngine } from '../storage/migrations.js';
-import type { WrenDocument, WrenSection, WrenSourceType } from '../types.js';
+import type { WrenDocument, WrenSection, WrenSourceType, WrenTreeNode } from '../types.js';
+
+/** Depth is a scope constraint, not a suggestion: more hops than this and Nano cannot navigate reliably. */
+export const MAX_SECTION_DEPTH = 3;
+
+export class SectionDepthError extends Error {
+  constructor(sectionId: string, depth: number) {
+    super(`Section "${sectionId}" has depth ${depth}, which exceeds the maximum of ${MAX_SECTION_DEPTH}`);
+    this.name = 'SectionDepthError';
+  }
+}
 
 interface DocumentRow {
   id: string;
@@ -7,6 +17,17 @@ interface DocumentRow {
   source_type: string;
   created_at: string;
   meta: string | null;
+}
+
+interface SectionRow {
+  id: string;
+  doc_id: string;
+  parent_id: string | null;
+  ordinal: number;
+  depth: number;
+  heading: string;
+  content: string;
+  label: string;
 }
 
 function rowToDocument(row: DocumentRow): WrenDocument {
@@ -19,6 +40,33 @@ function rowToDocument(row: DocumentRow): WrenDocument {
   };
 }
 
+/**
+ * Assembles a flat row list into a tree. Since a document may have more
+ * than one top-level (parentless) section, this returns a synthetic root
+ * node (`sectionId` equal to `docId`) whose children are the document's
+ * actual top-level sections, rather than an array of roots.
+ */
+function assembleTree(docId: string, rootLabel: string, rows: readonly SectionRow[]): WrenTreeNode {
+  const nodesById = new Map<string, WrenTreeNode>();
+  for (const row of rows) {
+    nodesById.set(row.id, { sectionId: row.id, heading: row.heading, label: row.label, children: [] });
+  }
+
+  const topLevel: WrenTreeNode[] = [];
+  for (const row of rows) {
+    const node = nodesById.get(row.id);
+    if (!node) continue;
+    const parent = row.parent_id ? nodesById.get(row.parent_id) : undefined;
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      topLevel.push(node);
+    }
+  }
+
+  return { sectionId: docId, heading: rootLabel, label: rootLabel, children: topLevel };
+}
+
 export class DocumentRepository {
   constructor(private readonly engine: SqlEngine) {}
 
@@ -29,8 +77,14 @@ export class DocumentRepository {
     );
   }
 
-  /** Batched in a single transaction. */
+  /** Batched in a single transaction. Rejects the whole batch if any section exceeds MAX_SECTION_DEPTH. */
   async insertSections(sections: readonly WrenSection[]): Promise<void> {
+    for (const section of sections) {
+      if (section.depth > MAX_SECTION_DEPTH) {
+        throw new SectionDepthError(section.id, section.depth);
+      }
+    }
+
     await this.engine.exec('BEGIN');
     try {
       for (const section of sections) {
@@ -64,6 +118,15 @@ export class DocumentRepository {
   async listDocuments(): Promise<WrenDocument[]> {
     const rows = await this.engine.query<DocumentRow>('SELECT * FROM documents ORDER BY created_at');
     return rows.map(rowToDocument);
+  }
+
+  async getTree(docId: string): Promise<WrenTreeNode> {
+    const doc = await this.getDocument(docId);
+    const rows = await this.engine.query<SectionRow>(
+      'SELECT * FROM sections WHERE doc_id = ? ORDER BY parent_id, ordinal',
+      [docId],
+    );
+    return assembleTree(docId, doc?.title ?? docId, rows);
   }
 
   /** Cascades to sections and, via the sections table's own triggers, to the FTS index. */
