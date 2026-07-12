@@ -1,5 +1,6 @@
 import type { WrenSection } from '../types.js';
 import type { LabelGenerator } from './LabelGenerator.js';
+import type { ProgressCallback } from './progress.js';
 
 const GENERIC_HEADING = /^(introduction|overview|summary|notes?|untitled|(section|chapter|part)\s*\d*)$/i;
 const MAX_LABEL_WORDS = 20;
@@ -23,8 +24,13 @@ function isShortOrGeneric(heading: string): boolean {
 
 /** Zero LLM calls. The default and the fallback when Nano is unavailable. */
 export class HeuristicLabeller implements LabelGenerator {
-  async generateLabels(sections: readonly WrenSection[]): Promise<WrenSection[]> {
-    return sections.map((section) => ({ ...section, label: this.buildLabel(section) }));
+  async generateLabels(sections: readonly WrenSection[], onProgress?: ProgressCallback): Promise<WrenSection[]> {
+    const total = sections.length;
+    return sections.map((section, index) => {
+      const labelled = { ...section, label: this.buildLabel(section) };
+      onProgress?.({ phase: 'labelling', current: index + 1, total });
+      return labelled;
+    });
   }
 
   private buildLabel(section: WrenSection): string {

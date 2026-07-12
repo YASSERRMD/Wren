@@ -1,6 +1,7 @@
 import type { NanoAdapterLike } from '../nano/NanoAdapter.js';
 import type { WrenSection } from '../types.js';
 import type { LabelGenerator } from './LabelGenerator.js';
+import type { ProgressCallback } from './progress.js';
 
 const MAX_BATCH_CHARS = 1500;
 const MAX_SECTION_CHARS_FOR_BATCHING = 500;
@@ -40,19 +41,24 @@ function groupIntoBatches(sections: readonly WrenSection[]): WrenSection[][] {
 export class NanoLabeller implements LabelGenerator {
   constructor(private readonly nano: NanoAdapterLike) {}
 
-  async generateLabels(sections: readonly WrenSection[]): Promise<WrenSection[]> {
+  async generateLabels(sections: readonly WrenSection[], onProgress?: ProgressCallback): Promise<WrenSection[]> {
+    const total = sections.length;
     const results: WrenSection[] = [];
+    let done = 0;
 
     for (const batch of groupIntoBatches(sections)) {
       if (batch.length === 1) {
         const label = await this.labelOne(batch[0]);
         results.push({ ...batch[0], label });
+        done += 1;
       } else {
         const labels = await this.labelBatch(batch);
         batch.forEach((section, index) => {
           results.push({ ...section, label: labels[index] ?? '' });
         });
+        done += batch.length;
       }
+      onProgress?.({ phase: 'labelling', current: done, total });
     }
 
     return results;
