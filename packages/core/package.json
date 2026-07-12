@@ -16,6 +16,7 @@
     "dist"
   ],
   "scripts": {
+    "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }
