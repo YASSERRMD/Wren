@@ -10,3 +10,7 @@ export { useQuery } from './useQuery.js';
 export type { UseQueryResult } from './useQuery.js';
 export { useStreamingQuery } from './useStreamingQuery.js';
 export type { UseStreamingQueryResult } from './useStreamingQuery.js';
+export { useIngest } from './useIngest.js';
+export type { UseIngestResult } from './useIngest.js';
+export { useDocuments } from './useDocuments.js';
+export type { UseDocumentsResult } from './useDocuments.js';
