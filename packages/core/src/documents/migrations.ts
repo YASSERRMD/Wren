@@ -56,3 +56,18 @@ export const INITIAL_MIGRATION: Migration = {
     END;
   `,
 };
+
+/**
+ * Content-addressed label caching (Phase 6): any section, past or present,
+ * whose content hashes the same as a new section's can donate its label,
+ * so re-ingesting unchanged content makes zero LLM calls. Deliberately a
+ * new migration rather than editing INITIAL_MIGRATION's already-shipped
+ * SQL, which would not re-run for anyone who already applied it.
+ */
+export const ADD_CONTENT_HASH_MIGRATION: Migration = {
+  version: 2,
+  up: `
+    ALTER TABLE sections ADD COLUMN content_hash TEXT;
+    CREATE INDEX idx_sections_content_hash ON sections (content_hash);
+  `,
+};

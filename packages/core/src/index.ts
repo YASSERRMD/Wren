@@ -10,7 +10,7 @@ export {
 export { RpcError } from './storage/rpc-protocol.js';
 
 export type { WrenDocument, WrenSection, WrenSourceType, WrenTreeNode } from './types.js';
-export { INITIAL_MIGRATION } from './documents/migrations.js';
+export { ADD_CONTENT_HASH_MIGRATION, INITIAL_MIGRATION } from './documents/migrations.js';
 export {
   DocumentRepository,
   MAX_SECTION_DEPTH,
@@ -39,4 +39,7 @@ export type { LabelGenerator } from './labelling/LabelGenerator.js';
 export type { IngestProgress, ProgressCallback } from './labelling/progress.js';
 export { HeuristicLabeller } from './labelling/HeuristicLabeller.js';
 export { NanoLabeller } from './labelling/NanoLabeller.js';
+export { hashContent } from './labelling/contentHash.js';
+export { CachingLabelGenerator } from './labelling/CachingLabelGenerator.js';
+export type { LabelCache } from './labelling/CachingLabelGenerator.js';
 

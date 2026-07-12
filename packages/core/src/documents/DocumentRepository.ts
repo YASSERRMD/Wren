@@ -1,3 +1,4 @@
+import { hashContent } from '../labelling/contentHash.js';
 import type { SqlEngine } from '../storage/migrations.js';
 import type { WrenDocument, WrenSection, WrenSourceType, WrenTreeNode } from '../types.js';
 
@@ -88,9 +89,10 @@ export class DocumentRepository {
     await this.engine.exec('BEGIN');
     try {
       for (const section of sections) {
+        const contentHash = await hashContent(section.content);
         await this.engine.exec(
-          `INSERT INTO sections (id, doc_id, parent_id, ordinal, depth, heading, content, label)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sections (id, doc_id, parent_id, ordinal, depth, heading, content, label, content_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             section.id,
             section.docId,
@@ -100,6 +102,7 @@ export class DocumentRepository {
             section.heading,
             section.content,
             section.label,
+            contentHash,
           ],
         );
       }
@@ -108,6 +111,19 @@ export class DocumentRepository {
       await this.engine.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  /**
+   * Content-addressed label cache lookup: any section, past or present,
+   * whose content hashes the same can donate its label. Requires
+   * ADD_CONTENT_HASH_MIGRATION to have been applied.
+   */
+  async findCachedLabel(contentHash: string): Promise<string | undefined> {
+    const rows = await this.engine.query<{ label: string }>(
+      'SELECT label FROM sections WHERE content_hash = ? LIMIT 1',
+      [contentHash],
+    );
+    return rows[0]?.label;
   }
 
   async getDocument(id: string): Promise<WrenDocument | undefined> {
