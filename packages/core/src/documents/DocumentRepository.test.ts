@@ -3,7 +3,7 @@ import { applyMigrations, type SqlEngine } from '../storage/migrations.js';
 import { createNodeSqlEngine } from '../test-support/node-sql-engine.js';
 import type { WrenDocument, WrenSection } from '../types.js';
 import { DocumentRepository, SectionDepthError } from './DocumentRepository.js';
-import { INITIAL_MIGRATION } from './migrations.js';
+import { ADD_CONTENT_HASH_MIGRATION, INITIAL_MIGRATION } from './migrations.js';
 
 function doc(overrides: Partial<WrenDocument> = {}): WrenDocument {
   return {
@@ -35,7 +35,7 @@ describe('DocumentRepository', () => {
 
   beforeEach(async () => {
     engine = await createNodeSqlEngine();
-    await applyMigrations(engine, [INITIAL_MIGRATION]);
+    await applyMigrations(engine, [INITIAL_MIGRATION, ADD_CONTENT_HASH_MIGRATION]);
     repo = new DocumentRepository(engine);
   });
 
