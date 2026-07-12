@@ -14,4 +14,8 @@ export default defineConfig({
       external: ['react', 'react-dom'],
     },
   },
+  test: {
+    environment: 'jsdom',
+    passWithNoTests: true,
+  },
 });

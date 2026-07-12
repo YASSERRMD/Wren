@@ -14,4 +14,8 @@ export default defineConfig({
       external: ['@angular/core', '@angular/common', 'rxjs'],
     },
   },
+  test: {
+    environment: 'jsdom',
+    passWithNoTests: true,
+  },
 });

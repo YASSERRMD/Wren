@@ -11,4 +11,8 @@ export default defineConfig({
       fileName: 'index',
     },
   },
+  test: {
+    environment: 'happy-dom',
+    passWithNoTests: true,
+  },
 });
