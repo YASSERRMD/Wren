@@ -12,7 +12,8 @@ export interface DispatcherOptions {
   signal?: AbortSignal;
 }
 
-const DEFAULT_BUDGET_RATIO = 0.7;
+/** Fraction of inputQuota a prompt may use before truncation kicks in. Exported so Wren.create() can reuse it as WrenOptions.budgetRatio's own default. */
+export const DEFAULT_BUDGET_RATIO = 0.7;
 /** Rough chars-per-token used only to size a last-resort content truncation; never trusted for the go/no-go budget decision itself, which always calls estimateTokens. */
 const APPROX_CHARS_PER_TOKEN = 4;
 
