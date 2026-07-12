@@ -20,4 +20,11 @@ export {
 export { NanoAdapter } from './nano/NanoAdapter.js';
 export type { NanoAvailability } from './nano/language-model.js';
 export type { JsonSchema } from './nano/validateSchema.js';
+export {
+  WrenContextOverflowError,
+  WrenNanoError,
+  WrenNanoUnavailableError,
+  WrenQuotaExceededError,
+  WrenSchemaError,
+} from './nano/errors.js';
 
