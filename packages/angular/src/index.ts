@@ -5,3 +5,4 @@ export { WrenService } from './WrenService.js';
 export type { WrenStatus } from './WrenService.js';
 export { provideWren } from './provideWren.js';
 export { WrenModule } from './WrenModule.js';
+export { WrenToolDirective } from './WrenToolDirective.js';
