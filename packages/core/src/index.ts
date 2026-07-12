@@ -57,4 +57,5 @@ export { compressSchema } from './tools/compressSchema.js';
 
 export type { Citation, DispatcherDecision, WrenResponse, WrenWarning } from './dispatcher/types.js';
 export { DECISION_SCHEMA } from './dispatcher/types.js';
+export { Dispatcher } from './dispatcher/Dispatcher.js';
 
