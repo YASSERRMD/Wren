@@ -48,3 +48,6 @@ export type { CreateLabelGeneratorResult, LabelStrategy } from './labelling/crea
 export { Ingestor } from './ingest/Ingestor.js';
 export type { IngestOptions, IngestResult } from './ingest/Ingestor.js';
 
+export { LexicalRetriever } from './retrieval/LexicalRetriever.js';
+export type { Candidate, LexicalSearchOptions } from './retrieval/LexicalRetriever.js';
+
