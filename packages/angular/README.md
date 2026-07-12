@@ -103,7 +103,12 @@ export class AssistantComponent {
   still on NgModules.
 - **`WrenToolDirective`** (`[wrenTool]`): registers its bound tool in
   `ngOnInit`, unregisters in `ngOnDestroy`, re-registers if the bound
-  tool object changes.
+  tool object changes. If the tool needs to change after the initial
+  render, bind it to a signal (`[wrenTool]="myTool()"`) rather than
+  reassigning a plain property: in a zoneless app, a plain property
+  mutation with nothing else marking the view dirty is not guaranteed
+  to reach `ngOnChanges` at all, since zoneless change detection only
+  rechecks what it knows changed.
 
 ## Signals, observables, and zone.js
 
