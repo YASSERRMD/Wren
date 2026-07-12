@@ -14,7 +14,21 @@ export interface NanoQuota {
   usage: number;
 }
 
-export class NanoAdapter {
+/**
+ * The interface everything downstream of Nano (labelling, the dispatcher,
+ * etc.) should depend on, rather than the concrete NanoAdapter, so
+ * MockNanoAdapter can stand in for every test outside the eval harness.
+ */
+export interface NanoAdapterLike {
+  prompt(input: string, opts?: LanguageModelPromptOptions): Promise<string>;
+  promptStructured<T>(input: string, schema: JsonSchema, opts?: LanguageModelPromptOptions): Promise<T>;
+  estimateTokens(text: string): Promise<number>;
+  readonly quota: NanoQuota;
+  clone(): Promise<NanoAdapterLike>;
+  destroy(): void;
+}
+
+export class NanoAdapter implements NanoAdapterLike {
   private overflowed = false;
   private readonly onContextOverflow = (): void => {
     this.overflowed = true;

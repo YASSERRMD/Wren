@@ -18,7 +18,7 @@ export {
 } from './documents/DocumentRepository.js';
 
 export { NanoAdapter } from './nano/NanoAdapter.js';
-export type { NanoQuota } from './nano/NanoAdapter.js';
+export type { NanoAdapterLike, NanoQuota } from './nano/NanoAdapter.js';
 export type { NanoAvailability } from './nano/language-model.js';
 export type { JsonSchema } from './nano/validateSchema.js';
 export {
@@ -28,4 +28,6 @@ export {
   WrenQuotaExceededError,
   WrenSchemaError,
 } from './nano/errors.js';
+export { MockNanoAdapter } from './nano/MockNanoAdapter.js';
+export type { MockNanoCall } from './nano/MockNanoAdapter.js';
 
