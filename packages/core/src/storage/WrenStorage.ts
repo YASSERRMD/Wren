@@ -1,3 +1,4 @@
+import { applyMigrations, type Migration, type SqlEngine } from './migrations.js';
 import { WorkerRpcClient } from './worker-rpc-client.js';
 
 /**
@@ -11,7 +12,7 @@ import { WorkerRpcClient } from './worker-rpc-client.js';
  * in Worker threads, not the main UI thread. Verified against the SQLite
  * Wasm project documentation as of the 3.53.0 release.
  */
-export class WrenStorage {
+export class WrenStorage implements SqlEngine {
   private readonly rpc: WorkerRpcClient;
   private readonly dbName: string;
   private closed = false;
@@ -21,13 +22,15 @@ export class WrenStorage {
     this.dbName = dbName;
   }
 
-  static async open(dbName: string): Promise<WrenStorage> {
+  static async open(dbName: string, migrations: readonly Migration[] = []): Promise<WrenStorage> {
     const worker = new Worker(new URL('./worker/storage.worker.ts', import.meta.url), {
       type: 'module',
     });
     const rpc = new WorkerRpcClient(worker);
     await rpc.call<{ dbName: string }, { persisted: boolean }>('open', { dbName });
-    return new WrenStorage(rpc, dbName);
+    const storage = new WrenStorage(rpc, dbName);
+    await applyMigrations(storage, migrations);
+    return storage;
   }
 
   async exec(sql: string, params?: unknown[]): Promise<void> {
