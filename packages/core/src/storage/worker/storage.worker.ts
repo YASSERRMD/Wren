@@ -29,6 +29,7 @@ async function handleOpen(params: OpenParams): Promise<{ persisted: boolean }> {
   poolUtil ??= await sqlite3.installOpfsSAHPoolVfs({ name: 'wren-opfs-sahpool' });
   const filename = `/${params.dbName}`;
   db = new poolUtil.OpfsSAHPoolDb(filename);
+  db.exec('PRAGMA foreign_keys = ON');
   openFilename = filename;
   return { persisted: true };
 }
