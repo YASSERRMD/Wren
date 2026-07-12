@@ -77,6 +77,95 @@ export class Dispatcher {
   async run(query: string, opts: DispatcherOptions = {}): Promise<WrenResponse> {
     const start = Date.now();
     const warnings: WrenWarning[] = [];
+    const { decision, hops } = await this.resolveDecision(query, warnings, opts);
+
+    if (decision.action === 'answer') {
+      return this.actAnswer(decision, query, hops, start, warnings, opts);
+    }
+    if (decision.action === 'tool') {
+      return this.actTool(decision, query, hops, start, warnings);
+    }
+    return {
+      answer: `No answer found: ${decision.reason}`,
+      citations: [],
+      action: 'none',
+      hops,
+      durationMs: Date.now() - start,
+      warnings,
+    };
+  }
+
+  /**
+   * Only the final answer-generation call streams: the decision call does
+   * not, because it is structured output and the whole thing is needed at
+   * once to act on it. Each yielded value carries the answer accumulated
+   * so far; every other field is already final by the first yield.
+   */
+  async *runStreaming(query: string, opts: DispatcherOptions = {}): AsyncGenerator<Partial<WrenResponse>> {
+    const start = Date.now();
+    const warnings: WrenWarning[] = [];
+    const { decision, hops } = await this.resolveDecision(query, warnings, opts);
+
+    if (decision.action === 'none') {
+      yield {
+        answer: `No answer found: ${decision.reason}`,
+        citations: [],
+        action: 'none',
+        hops,
+        durationMs: Date.now() - start,
+        warnings,
+      };
+      return;
+    }
+
+    if (decision.action === 'tool') {
+      const result = await this.registry.invoke(decision.tool, decision.args);
+      const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
+      yield* this.streamAnswer(prompt, (answer) => ({
+        answer,
+        citations: [],
+        action: 'tool',
+        toolCall: { name: decision.tool, args: decision.args, result: result.content },
+        hops,
+        durationMs: Date.now() - start,
+        warnings,
+      }));
+      return;
+    }
+
+    const sections = await this.loadAndBudgetSections(decision.sectionIds, query, warnings, opts);
+    if (sections.length === 0) {
+      yield {
+        answer: 'No answer found: the chosen sections could not be located.',
+        citations: [],
+        action: 'none',
+        hops,
+        durationMs: Date.now() - start,
+        warnings,
+      };
+      return;
+    }
+    const citations = sectionsToCitations(sections);
+    yield* this.streamAnswer(buildAnswerPrompt(query, sections), (answer) => ({
+      answer,
+      citations,
+      action: 'answer',
+      hops,
+      durationMs: Date.now() - start,
+      warnings,
+    }));
+  }
+
+  /** Steps 1 and 2: prefilter, decide, and the hard-capped navigate loop. Shared by run() and runStreaming(). */
+  private async resolveDecision(
+    query: string,
+    warnings: WrenWarning[],
+    opts: DispatcherOptions,
+  ): Promise<{
+    decision: Exclude<DispatcherDecision, { action: 'navigate' }>;
+    candidates: Candidate[];
+    hops: number;
+  }> {
     let candidates = await this.retriever.search(query);
 
     let hops = 0;
@@ -106,76 +195,7 @@ export class Dispatcher {
     // The while condition above guarantees decision.action !== 'navigate'
     // here; TypeScript cannot see that across the loop's own reassignments,
     // so this is a narrow, deliberate assertion of that runtime invariant.
-    const resolved = decision as Exclude<DispatcherDecision, { action: 'navigate' }>;
-
-    if (resolved.action === 'none') {
-      return {
-        answer: `No answer found: ${resolved.reason}`,
-        citations: [],
-        action: 'none',
-        hops,
-        durationMs: Date.now() - start,
-        warnings,
-      };
-    }
-
-    if (resolved.action === 'answer') {
-      let sections = await this.repo.getSections(resolved.sectionIds);
-      if (sections.length === 0) {
-        return {
-          answer: 'No answer found: the chosen sections could not be located.',
-          citations: [],
-          action: 'none',
-          hops,
-          durationMs: Date.now() - start,
-          warnings,
-        };
-      }
-
-      // Ordered truncation: drop whole sections first, then, only if a
-      // single remaining section is still too big, shorten its content.
-      const budget = this.nano.quota.inputQuota * (opts.budgetRatio ?? DEFAULT_BUDGET_RATIO);
-      while (sections.length > 1 && (await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
-        sections = sections.slice(0, -1);
-        warnings.push({
-          kind: 'budget-truncated',
-          detail: `Dropped an answer section to fit the token budget; ${sections.length} remain.`,
-        });
-      }
-      if ((await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
-        const maxChars = Math.max(200, Math.floor(budget * APPROX_CHARS_PER_TOKEN));
-        sections = [{ ...sections[0], content: truncateText(sections[0].content, maxChars) }];
-        warnings.push({
-          kind: 'budget-truncated',
-          detail: 'Truncated the answer section content to fit the token budget.',
-        });
-      }
-
-      const answer = await this.nano.prompt(buildAnswerPrompt(query, sections));
-
-      return {
-        answer,
-        citations: sectionsToCitations(sections),
-        action: 'answer',
-        hops,
-        durationMs: Date.now() - start,
-        warnings,
-      };
-    }
-
-    const result = await this.registry.invoke(resolved.tool, resolved.args);
-    const prompt = buildToolFollowupPrompt(query, resolved.tool, resolved.args, result.content);
-    const answer = await this.nano.prompt(prompt);
-
-    return {
-      answer,
-      citations: [],
-      action: 'tool',
-      toolCall: { name: resolved.tool, args: resolved.args, result: result.content },
-      hops,
-      durationMs: Date.now() - start,
-      warnings,
-    };
+    return { decision: decision as Exclude<DispatcherDecision, { action: 'navigate' }>, candidates, hops };
   }
 
   private async decide(
@@ -202,5 +222,100 @@ export class Dispatcher {
     }
 
     return this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA);
+  }
+
+  /** Ordered truncation: drop whole sections first, then, only if a single remaining section is still too big, shorten its content. */
+  private async loadAndBudgetSections(
+    sectionIds: readonly string[],
+    query: string,
+    warnings: WrenWarning[],
+    opts: DispatcherOptions,
+  ): Promise<WrenSection[]> {
+    let sections = await this.repo.getSections(sectionIds);
+    if (sections.length === 0) return [];
+
+    const budget = this.nano.quota.inputQuota * (opts.budgetRatio ?? DEFAULT_BUDGET_RATIO);
+
+    while (sections.length > 1 && (await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
+      sections = sections.slice(0, -1);
+      warnings.push({
+        kind: 'budget-truncated',
+        detail: `Dropped an answer section to fit the token budget; ${sections.length} remain.`,
+      });
+    }
+    if ((await this.nano.estimateTokens(buildAnswerPrompt(query, sections))) > budget) {
+      const maxChars = Math.max(200, Math.floor(budget * APPROX_CHARS_PER_TOKEN));
+      sections = [{ ...sections[0], content: truncateText(sections[0].content, maxChars) }];
+      warnings.push({
+        kind: 'budget-truncated',
+        detail: 'Truncated the answer section content to fit the token budget.',
+      });
+    }
+    return sections;
+  }
+
+  private async actAnswer(
+    decision: { action: 'answer'; sectionIds: string[] },
+    query: string,
+    hops: number,
+    start: number,
+    warnings: WrenWarning[],
+    opts: DispatcherOptions,
+  ): Promise<WrenResponse> {
+    const sections = await this.loadAndBudgetSections(decision.sectionIds, query, warnings, opts);
+    if (sections.length === 0) {
+      return {
+        answer: 'No answer found: the chosen sections could not be located.',
+        citations: [],
+        action: 'none',
+        hops,
+        durationMs: Date.now() - start,
+        warnings,
+      };
+    }
+
+    const answer = await this.nano.prompt(buildAnswerPrompt(query, sections));
+
+    return {
+      answer,
+      citations: sectionsToCitations(sections),
+      action: 'answer',
+      hops,
+      durationMs: Date.now() - start,
+      warnings,
+    };
+  }
+
+  private async actTool(
+    decision: { action: 'tool'; tool: string; args: Record<string, unknown> },
+    query: string,
+    hops: number,
+    start: number,
+    warnings: WrenWarning[],
+  ): Promise<WrenResponse> {
+    const result = await this.registry.invoke(decision.tool, decision.args);
+    const prompt = buildToolFollowupPrompt(query, decision.tool, decision.args, result.content);
+    const answer = await this.nano.prompt(prompt);
+
+    return {
+      answer,
+      citations: [],
+      action: 'tool',
+      toolCall: { name: decision.tool, args: decision.args, result: result.content },
+      hops,
+      durationMs: Date.now() - start,
+      warnings,
+    };
+  }
+
+  private async *streamAnswer(
+    prompt: string,
+    buildPartial: (accumulated: string) => Partial<WrenResponse>,
+  ): AsyncGenerator<Partial<WrenResponse>> {
+    let accumulated = '';
+    for await (const delta of this.nano.promptStreaming(prompt)) {
+      accumulated += delta;
+      yield buildPartial(accumulated);
+    }
   }
 }
