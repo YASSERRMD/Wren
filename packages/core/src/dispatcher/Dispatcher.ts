@@ -28,6 +28,17 @@ function truncateText(text: string, maxChars: number): string {
   return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trim()}...`;
 }
 
+/**
+ * Per-action criteria, not just a one-line list of the four action names:
+ * an eval run against real Gemini Nano found a bidirectional ~56% action
+ * accuracy (queries expecting answer/tool often resolving to none, and
+ * vice versa), which reads like too little signal to discriminate
+ * reliably rather than random noise. The explicit "prefer X over none
+ * when..." / "do not choose X just to avoid none" framing targets both
+ * failure directions at once; unverified against real Nano from here (see
+ * the linked issue), so evals/ should be re-run to confirm this actually
+ * moves the accuracy number.
+ */
 function buildDecisionPrompt(query: string, toolsText: string, candidates: readonly Candidate[]): string {
   const candidateLines = candidates.map((c) => `${c.sectionId}: ${c.heading} - ${c.label}`).join('\n');
   return [
@@ -39,8 +50,11 @@ function buildDecisionPrompt(query: string, toolsText: string, candidates: reado
     'Candidate sections:',
     candidateLines || '(none)',
     '',
-    'Decide the best action: answer directly using one or more candidate sections, ' +
-      'call a tool, navigate into a candidate section for more detail, or report none found.',
+    'Decide the single best action for this query:',
+    '- answer: a candidate section is topically relevant to the query, even if not a perfect or complete match. Prefer this over none whenever a candidate genuinely relates to what is being asked.',
+    '- tool: a tool description matches an action the query is asking to perform, rather than a question about existing content.',
+    '- navigate: a candidate is clearly a broad overview and a more specific child section (not shown here) likely holds the real answer.',
+    '- none: only when nothing among the candidate sections or tools actually relates to the query. Do not choose answer or tool just to avoid saying none.',
   ].join('\n');
 }
 
