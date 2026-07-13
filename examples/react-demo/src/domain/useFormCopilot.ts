@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTool, useWren } from '@wren/react';
 import type { Citation } from '@wren/core';
-import { ALL_FIELDS, FORM_SECTIONS } from './fields.js';
+import { ALL_FIELDS, FORM_SECTIONS, type FieldDefinition } from './fields.js';
 import { createFormTools } from './tools.js';
 
 export interface FieldExplanation {
@@ -20,6 +20,23 @@ const MAX_COPILOT_STEPS = ALL_FIELDS.length + 2;
  * since the loop bailed on the very first unproductive step.
  */
 const MAX_CONSECUTIVE_MISSES = 2;
+
+/**
+ * Bare camelCase names (orgName, orgType, ...) gave the model no signal to
+ * tell e.g. "organization name" from "organization type" apart, especially
+ * since select_option's own tool description advertises "organization
+ * type" by name; a real repro showed the model gravitating to orgType for
+ * an unambiguous organization-name statement. Spelling out each field's
+ * label, kind, and (for selects) exact valid options gives it much more to
+ * disambiguate on.
+ */
+function describeField(field: FieldDefinition): string {
+  if (field.type === 'select' && field.options) {
+    const optionList = field.options.map((o) => o.label).join(', ');
+    return `- ${field.name}: "${field.label}" (a select field; valid options are ${optionList})`;
+  }
+  return `- ${field.name}: "${field.label}" (a ${field.type} field)`;
+}
 
 export function useFormCopilot() {
   const { wren, status } = useWren();
@@ -65,13 +82,20 @@ export function useFormCopilot() {
 
       try {
         for (let step = 0; step < MAX_COPILOT_STEPS; step += 1) {
-          const emptyFields = ALL_FIELDS.filter((f) => !filled[f.name]?.trim()).map((f) => f.name);
+          const emptyFields = ALL_FIELDS.filter((f) => !filled[f.name]?.trim());
           if (emptyFields.length === 0) {
             appendLog('All fields filled.');
             break;
           }
 
-          const prompt = `The applicant described their situation as: "${prose}"\n\nStill-empty form fields: ${emptyFields.join(', ')}.\nFill in exactly one still-empty field that can be determined from what the applicant said, using fill_field or select_option. If nothing more can be determined from what they said, say so instead of calling a tool.`;
+          const prompt = [
+            `The applicant described their situation as: "${prose}"`,
+            '',
+            'Still-empty form fields (use the identifier before the colon as the field argument, not its label):',
+            emptyFields.map(describeField).join('\n'),
+            '',
+            'Fill in exactly one still-empty field that can be determined from what the applicant said, using fill_field or select_option. If nothing more can be determined from what they said, say so instead of calling a tool.',
+          ].join('\n');
           const response = await wren.query(prompt);
 
           if (response.action !== 'tool') {
