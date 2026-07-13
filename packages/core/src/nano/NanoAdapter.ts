@@ -14,6 +14,12 @@ export interface NanoQuota {
   usage: number;
 }
 
+/** The subset of LanguageModelCreateOptions worth preserving across a fallback re-creation (see cloneIsolated); excludes one-shot fields like monitor/signal that must not be replayed on a later, unrelated create() call. */
+type StableCreateOptions = Pick<LanguageModelCreateOptions, 'initialPrompts' | 'expectedInputs' | 'expectedOutputs'>;
+
+/** Every prompt template Wren builds internally (Dispatcher's decide/answer/tool-followup, NanoLabeller's labelling prompts) is hardcoded English text, so this is what NanoAdapter.create() declares by default. Chrome logs a quality/safety warning when expectedOutputs is left unspecified entirely; pass nanoOptions.expectedOutputs explicitly to override for a differently-localized deployment. */
+const DEFAULT_EXPECTED_OUTPUTS: LanguageModelCreateOptions['expectedOutputs'] = [{ type: 'text', languages: ['en'] }];
+
 /**
  * The interface everything downstream of Nano (labelling, the dispatcher,
  * etc.) should depend on, rather than the concrete NanoAdapter, so
@@ -31,14 +37,10 @@ export interface NanoAdapterLike {
 }
 
 export class NanoAdapter implements NanoAdapterLike {
-  private overflowed = false;
-  private readonly onContextOverflow = (): void => {
-    this.overflowed = true;
-  };
-
-  protected constructor(protected readonly session: LanguageModelSession) {
-    this.session.addEventListener('contextoverflow', this.onContextOverflow);
-  }
+  protected constructor(
+    protected readonly session: LanguageModelSession,
+    private readonly stableOptions: StableCreateOptions,
+  ) {}
 
   static async availability(): Promise<NanoAvailability> {
     if (typeof LanguageModel === 'undefined') {
@@ -55,19 +57,20 @@ export class NanoAdapter implements NanoAdapterLike {
     if (availability === 'unavailable') {
       throw new WrenNanoUnavailableError('availability() reported unavailable');
     }
-    const session = await LanguageModel.create(options);
-    return new NanoAdapter(session);
+    const effectiveOptions: LanguageModelCreateOptions = {
+      ...options,
+      expectedOutputs: options.expectedOutputs ?? DEFAULT_EXPECTED_OUTPUTS,
+    };
+    const session = await LanguageModel.create(effectiveOptions);
+    return new NanoAdapter(session, {
+      initialPrompts: effectiveOptions.initialPrompts,
+      expectedInputs: effectiveOptions.expectedInputs,
+      expectedOutputs: effectiveOptions.expectedOutputs,
+    });
   }
 
   async prompt(input: string, opts: LanguageModelPromptOptions = {}): Promise<string> {
-    if (this.overflowed) {
-      throw new WrenContextOverflowError();
-    }
-    try {
-      return await this.session.prompt(input, opts);
-    } catch (error) {
-      throw this.translateError(error);
-    }
+    return this.withIsolatedSession((isolated) => isolated.prompt(input, opts));
   }
 
   async promptStructured<T>(
@@ -103,22 +106,31 @@ export class NanoAdapter implements NanoAdapterLike {
    * promptStreaming at all.
    */
   async *promptStreaming(input: string, opts: LanguageModelPromptOptions = {}): AsyncGenerator<string> {
-    if (this.overflowed) {
-      throw new WrenContextOverflowError();
-    }
-    if (!this.session.promptStreaming) {
-      yield await this.prompt(input, opts);
-      return;
-    }
-    let runningTotal = '';
+    const isolated = await this.cloneIsolated();
+    let overflowed = false;
+    const onOverflow = (): void => {
+      overflowed = true;
+    };
+    isolated.addEventListener('contextoverflow', onOverflow);
     try {
-      for await (const chunk of this.session.promptStreaming(input, opts)) {
+      if (!isolated.promptStreaming) {
+        yield await isolated.prompt(input, opts);
+        return;
+      }
+      let runningTotal = '';
+      for await (const chunk of isolated.promptStreaming(input, opts)) {
         const isCumulative = runningTotal.length > 0 && chunk.startsWith(runningTotal);
         yield isCumulative ? chunk.slice(runningTotal.length) : chunk;
         runningTotal = isCumulative ? chunk : runningTotal + chunk;
       }
+      if (overflowed) {
+        throw new WrenContextOverflowError();
+      }
     } catch (error) {
       throw this.translateError(error);
+    } finally {
+      isolated.removeEventListener('contextoverflow', onOverflow);
+      isolated.destroy();
     }
   }
 
@@ -127,7 +139,11 @@ export class NanoAdapter implements NanoAdapterLike {
    * a character-based heuristic (roughly 4 characters per token for
    * English text) when neither is exposed. Prefers measureContextUsage,
    * the current API name; measureInputUsage is the obsolete alias some
-   * Chrome builds may still carry.
+   * Chrome builds may still carry. Reads from the held template session
+   * (see cloneIsolated's doc comment): since that session is never
+   * prompted directly, its usage is always 0, so this always measures
+   * against a full fresh budget, matching what an actual isolated call
+   * will see.
    */
   async estimateTokens(text: string): Promise<number> {
     const measure = this.session.measureContextUsage ?? this.session.measureInputUsage;
@@ -137,7 +153,7 @@ export class NanoAdapter implements NanoAdapterLike {
     return Math.ceil(text.length / 4);
   }
 
-  /** Read live from the session on every access, never hard-coded. */
+  /** Read live from the held template session on every access, never hard-coded; see cloneIsolated's doc comment for why its usage is always 0. */
   get quota(): NanoQuota {
     const contextWindow = this.session.contextWindow ?? this.session.inputQuota ?? 0;
     const usage = this.session.contextUsage ?? this.session.inputUsage ?? 0;
@@ -149,28 +165,17 @@ export class NanoAdapter implements NanoAdapterLike {
   }
 
   /**
-   * Creating a session is expensive, so the intended pattern is to hold one
-   * long-lived NanoAdapter and call clone() to get an isolated copy per
-   * request, so unrelated calls do not accumulate shared context. Uses
-   * session.clone() where available; recreates via LanguageModel.create()
-   * if this Chrome build does not expose it. Documented per Phase 4's
-   * requirement to record which path was used and why, rather than leaving
-   * callers to guess whether isolation actually happened.
+   * Returns an independent NanoAdapter over a clone of the held session.
+   * Exposed for callers that want their own long-lived adapter (e.g. a
+   * separate Wren instance); nothing inside this class needs it, since
+   * every prompt already isolates itself (see withIsolatedSession).
    */
   async clone(): Promise<NanoAdapter> {
-    if (this.session.clone) {
-      const cloned = await this.session.clone();
-      return new NanoAdapter(cloned);
-    }
-    if (typeof LanguageModel === 'undefined') {
-      throw new WrenNanoUnavailableError('LanguageModel is not present in this browser');
-    }
-    const recreated = await LanguageModel.create();
-    return new NanoAdapter(recreated);
+    const cloned = await this.cloneIsolated();
+    return new NanoAdapter(cloned, this.stableOptions);
   }
 
   destroy(): void {
-    this.session.removeEventListener('contextoverflow', this.onContextOverflow);
     this.session.destroy();
   }
 
@@ -180,5 +185,55 @@ export class NanoAdapter implements NanoAdapterLike {
       return new WrenQuotaExceededError(withProps.requested, withProps.contextWindow);
     }
     return error;
+  }
+
+  /**
+   * session.clone() copies the CURRENT conversation state rather than
+   * resetting it (verified empirically against real Chrome: a clone's
+   * contextUsage starts equal to the source's, not 0). Prompting the held
+   * session directly would therefore let every call accumulate into one
+   * ever-growing conversation shared across ingestion labelling and every
+   * query; in practice this measurably wastes budget and, worse, biases
+   * later free-form calls toward whatever shape recent calls used (e.g. a
+   * run of JSON-schema-constrained labelling calls making a later
+   * unconstrained answer call keep responding in that same JSON shape).
+   * Every prompt this class builds is already fully self-contained (all
+   * needed context is embedded in the prompt text itself), so no call
+   * ever benefits from seeing another call's history. The fix: the held
+   * session is a template that is NEVER prompted directly (confirmed
+   * empirically: a template that is only ever cloned, never prompted,
+   * keeps contextUsage at 0 forever, so every clone starts genuinely
+   * fresh); each real prompt() / promptStreaming() call clones its own
+   * isolated session, uses it once, and destroys it.
+   */
+  private async cloneIsolated(): Promise<LanguageModelSession> {
+    if (this.session.clone) {
+      return this.session.clone();
+    }
+    if (typeof LanguageModel === 'undefined') {
+      throw new WrenNanoUnavailableError('LanguageModel is not present in this browser');
+    }
+    return LanguageModel.create(this.stableOptions);
+  }
+
+  private async withIsolatedSession<T>(run: (isolated: LanguageModelSession) => Promise<T>): Promise<T> {
+    const isolated = await this.cloneIsolated();
+    let overflowed = false;
+    const onOverflow = (): void => {
+      overflowed = true;
+    };
+    isolated.addEventListener('contextoverflow', onOverflow);
+    try {
+      const result = await run(isolated);
+      if (overflowed) {
+        throw new WrenContextOverflowError();
+      }
+      return result;
+    } catch (error) {
+      throw this.translateError(error);
+    } finally {
+      isolated.removeEventListener('contextoverflow', onOverflow);
+      isolated.destroy();
+    }
   }
 }

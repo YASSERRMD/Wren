@@ -11,7 +11,7 @@ export default defineConfig({
       fileName: 'index',
     },
     rollupOptions: {
-      external: ['react', 'react-dom', '@wren/core'],
+      external: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', '@wren/core'],
     },
   },
   test: {

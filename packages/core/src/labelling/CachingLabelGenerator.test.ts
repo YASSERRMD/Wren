@@ -81,8 +81,15 @@ describe('CachingLabelGenerator', () => {
     const cache: LabelCache = {
       findCachedLabel: async (hash) => (hash === cachedHash ? 'cached label' : undefined),
     };
-    const mock = new MockNanoAdapter([JSON.stringify({ label: 'a' }), JSON.stringify({ label: 'b' })]);
-    const caching = new CachingLabelGenerator(new NanoLabeller(mock), cache);
+    // Tight enough that the two 600-char sections below (177 tokens solo
+    // each, 351 batched together) can't share a call, so each becomes its
+    // own single-label response as the queue below expects.
+    const mock = new MockNanoAdapter([JSON.stringify({ label: 'a' }), JSON.stringify({ label: 'b' })], {
+      inputQuota: 250,
+      contextWindow: 250,
+      usage: 0,
+    });
+    const caching = new CachingLabelGenerator(new NanoLabeller(mock, 1), cache);
 
     const results = await caching.generateLabels(
       [

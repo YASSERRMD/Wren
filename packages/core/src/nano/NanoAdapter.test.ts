@@ -6,6 +6,7 @@ import {
   WrenSchemaError,
 } from './errors.js';
 import type {
+  LanguageModelCreateOptions,
   LanguageModelPromptOptions,
   LanguageModelSession,
   LanguageModelStatic,
@@ -101,6 +102,39 @@ describe('NanoAdapter', () => {
       const adapter = await NanoAdapter.create();
       expect(adapter).toBeInstanceOf(NanoAdapter);
     });
+
+    it('defaults expectedOutputs to English, matching Wren\'s own hardcoded English prompt templates', async () => {
+      const session = new FakeSession();
+      let seenOptions: LanguageModelCreateOptions | undefined;
+      vi.stubGlobal('LanguageModel', {
+        availability: async () => 'available',
+        create: async (options?: LanguageModelCreateOptions) => {
+          seenOptions = options;
+          return session;
+        },
+      } satisfies LanguageModelStatic);
+
+      await NanoAdapter.create();
+
+      expect(seenOptions?.expectedOutputs).toEqual([{ type: 'text', languages: ['en'] }]);
+    });
+
+    it('respects an explicit expectedOutputs override instead of the English default', async () => {
+      const session = new FakeSession();
+      let seenOptions: LanguageModelCreateOptions | undefined;
+      vi.stubGlobal('LanguageModel', {
+        availability: async () => 'available',
+        create: async (options?: LanguageModelCreateOptions) => {
+          seenOptions = options;
+          return session;
+        },
+      } satisfies LanguageModelStatic);
+      const expectedOutputs = [{ type: 'text' as const, languages: ['ja' as const] }];
+
+      await NanoAdapter.create({ expectedOutputs });
+
+      expect(seenOptions?.expectedOutputs).toBe(expectedOutputs);
+    });
   });
 
   describe('prompt', () => {
@@ -129,11 +163,36 @@ describe('NanoAdapter', () => {
       expect((caught as WrenQuotaExceededError).contextWindow).toBe(6000);
     });
 
-    it('throws WrenContextOverflowError on the call after contextoverflow fires', async () => {
+    it('throws WrenContextOverflowError for a call that fires contextoverflow on its own isolated session', async () => {
       const session = stubLanguageModel({});
+      const clonedSession = new FakeSession();
+      session.clone = async () => clonedSession;
+      clonedSession.promptImpl = async (input) => {
+        clonedSession.fire('contextoverflow');
+        return input;
+      };
       const adapter = await NanoAdapter.create();
-      session.fire('contextoverflow');
       await expect(adapter.prompt('hi')).rejects.toBeInstanceOf(WrenContextOverflowError);
+    });
+
+    it('does not let one call overflowing affect a later, unrelated call', async () => {
+      const session = stubLanguageModel({});
+      let cloneCount = 0;
+      session.clone = async () => {
+        cloneCount += 1;
+        const clone = new FakeSession();
+        // Only the first call's isolated session overflows.
+        if (cloneCount === 1) {
+          clone.promptImpl = async (input) => {
+            clone.fire('contextoverflow');
+            return input;
+          };
+        }
+        return clone;
+      };
+      const adapter = await NanoAdapter.create();
+      await expect(adapter.prompt('first')).rejects.toBeInstanceOf(WrenContextOverflowError);
+      await expect(adapter.prompt('second')).resolves.toBe('second');
     });
 
     it('leaves other errors untranslated', async () => {
@@ -143,6 +202,20 @@ describe('NanoAdapter', () => {
       };
       const adapter = await NanoAdapter.create();
       await expect(adapter.prompt('hi')).rejects.toBeInstanceOf(RangeError);
+    });
+
+    it('prompts an isolated clone rather than the held session, and never accumulates history on it', async () => {
+      const session = stubLanguageModel({});
+      session.promptImpl = async () => {
+        throw new Error('the held session should never be prompted directly');
+      };
+      const clonedSession = new FakeSession();
+      clonedSession.promptImpl = async (input) => `echo:${input}`;
+      session.clone = async () => clonedSession;
+
+      const adapter = await NanoAdapter.create();
+      await expect(adapter.prompt('hi')).resolves.toBe('echo:hi');
+      expect(clonedSession.destroyed).toBe(true);
     });
   });
 
@@ -257,15 +330,64 @@ describe('NanoAdapter', () => {
   });
 
   describe('destroy', () => {
-    it('destroys the session and unsubscribes the overflow listener', async () => {
+    it('destroys the held session', async () => {
       const session = stubLanguageModel({});
       const adapter = await NanoAdapter.create();
-      expect(session.listenerCount('contextoverflow')).toBe(1);
 
       adapter.destroy();
 
       expect(session.destroyed).toBe(true);
-      expect(session.listenerCount('contextoverflow')).toBe(0);
+    });
+  });
+
+  describe('isolation', () => {
+    it('never prompts the held session directly, so its own usage never grows', async () => {
+      const session = stubLanguageModel({});
+      session.contextUsage = 0;
+      const clonedSession = new FakeSession();
+      session.clone = async () => clonedSession;
+      const adapter = await NanoAdapter.create();
+
+      await adapter.prompt('one');
+      await adapter.prompt('two');
+      await adapter.prompt('three');
+
+      expect(session.contextUsage).toBe(0);
+    });
+
+    it('cleans up each isolated clone (removes its listener, destroys it) after use', async () => {
+      const session = stubLanguageModel({});
+      const clonedSession = new FakeSession();
+      session.clone = async () => clonedSession;
+      const adapter = await NanoAdapter.create();
+
+      await adapter.prompt('hi');
+
+      expect(clonedSession.destroyed).toBe(true);
+      expect(clonedSession.listenerCount('contextoverflow')).toBe(0);
+    });
+
+    it('preserves initialPrompts and expectedOutputs when falling back to LanguageModel.create() without session.clone', async () => {
+      const session = new FakeSession();
+      session.clone = undefined;
+      const seenOptions: LanguageModelCreateOptions[] = [];
+      const stub: LanguageModelStatic = {
+        availability: async () => 'available',
+        create: async (options) => {
+          seenOptions.push(options ?? {});
+          return session;
+        },
+      };
+      vi.stubGlobal('LanguageModel', stub);
+      const initialPrompts = [{ role: 'system', content: 'be concise' }];
+
+      const adapter = await NanoAdapter.create({ initialPrompts });
+      seenOptions.length = 0; // Only interested in calls made by prompt() below, not the create() above.
+      await adapter.prompt('hi');
+
+      expect(seenOptions).toEqual([
+        { initialPrompts, expectedInputs: undefined, expectedOutputs: [{ type: 'text', languages: ['en'] }] },
+      ]);
     });
   });
 });

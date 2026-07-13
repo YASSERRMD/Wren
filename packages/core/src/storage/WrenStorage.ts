@@ -1,6 +1,7 @@
 import { WrenStorageClosedError, WrenStorageUnsupportedError } from './errors.js';
 import { applyMigrations, type Migration, type SqlEngine } from './migrations.js';
 import { WorkerRpcClient } from './worker-rpc-client.js';
+import StorageWorker from './worker/storage.worker.ts?worker&inline';
 
 /**
  * Async wrapper around a SQLite database persisted to OPFS via the SAHPool
@@ -28,9 +29,15 @@ export class WrenStorage implements SqlEngine {
     if (reason) {
       throw new WrenStorageUnsupportedError(reason);
     }
-    const worker = new Worker(new URL('./worker/storage.worker.ts', import.meta.url), {
-      type: 'module',
-    });
+    // Built via Vite's ?worker&inline suffix, which embeds the worker's own
+    // compiled output directly into this package's bundle rather than
+    // referencing it by a build-time-resolved file path. A plain
+    // `new Worker(new URL(...))` bakes in a path relative to @wren/core's
+    // own dist/ output; that path does not resolve correctly once this
+    // package is consumed as a pre-built dependency by another app's own
+    // bundler; the app has no way to know it needs to also serve a chunk
+    // that only appears inside a dependency's compiled internals.
+    const worker = new StorageWorker();
     const rpc = new WorkerRpcClient(worker);
     await rpc.call<{ dbName: string }, { persisted: boolean }>('open', { dbName });
     const storage = new WrenStorage(rpc, dbName);

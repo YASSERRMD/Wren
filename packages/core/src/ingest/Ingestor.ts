@@ -3,6 +3,7 @@ import { CachingLabelGenerator } from '../labelling/CachingLabelGenerator.js';
 import { hashContent } from '../labelling/contentHash.js';
 import { createLabelGenerator, type LabelStrategy } from '../labelling/createLabelGenerator.js';
 import type { IngestProgress, ProgressCallback } from '../labelling/progress.js';
+import type { NanoAdapterLike } from '../nano/NanoAdapter.js';
 import type { WrenDocument } from '../types.js';
 import { parse } from './parse.js';
 import { DEFAULT_MAX_SECTION_CHARS, type ParseWarning, type WrenSource } from './types.js';
@@ -51,7 +52,21 @@ export interface IngestResult {
 
 /** The only ingest API consumers touch: parse, label, and index in one call. */
 export class Ingestor {
-  constructor(private readonly repo: DocumentRepository) {}
+  /**
+   * nano, when given, is the SAME adapter Wren's own Dispatcher queries
+   * through; labelling reuses it rather than createLabelGenerator's
+   * default of creating (and, since nothing ever destroyed it, leaking) a
+   * brand-new LanguageModelSession on every single ingest() call. Safe to
+   * share: NanoAdapter isolates every individual prompt() call onto its
+   * own fresh cloned session internally, so labelling calls here can run
+   * even while a query is in flight on the same adapter without either
+   * seeing the other's conversation state. Omit only when no Nano access
+   * is available or desired at all (e.g. a heuristic-only setup).
+   */
+  constructor(
+    private readonly repo: DocumentRepository,
+    private readonly nano?: NanoAdapterLike,
+  ) {}
 
   async ingest(source: WrenSource, opts: IngestOptions = {}): Promise<IngestResult> {
     const start = Date.now();
@@ -67,7 +82,11 @@ export class Ingestor {
     // (or the caller's explicit override) replaces it on every section.
     const sections = parsed.sections.map((section) => ({ ...section, docId }));
 
-    const { generator, strategy } = await createLabelGenerator(opts.labeller ?? 'auto');
+    const nano = this.nano;
+    const { generator, strategy } = await createLabelGenerator(
+      opts.labeller ?? 'auto',
+      nano ? () => Promise.resolve(nano) : undefined,
+    );
     const cachingGenerator = new CachingLabelGenerator(generator, this.repo);
     // Checking the signal from inside onProgress, which the labeller calls
     // synchronously after each section or batch, is what makes cancellation

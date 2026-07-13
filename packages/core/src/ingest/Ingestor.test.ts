@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DocumentRepository } from '../documents/DocumentRepository.js';
 import { ADD_CONTENT_HASH_MIGRATION, INITIAL_MIGRATION } from '../documents/migrations.js';
+import { MockNanoAdapter } from '../nano/MockNanoAdapter.js';
 import { applyMigrations, type SqlEngine } from '../storage/migrations.js';
 import { createNodeSqlEngine } from '../test-support/node-sql-engine.js';
 import { Ingestor } from './Ingestor.js';
@@ -12,6 +13,10 @@ async function makeRepo(): Promise<{ engine: SqlEngine; repo: DocumentRepository
 }
 
 describe('Ingestor', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('full ingest produces queryable FTS rows', async () => {
     const { engine, repo } = await makeRepo();
     const ingestor = new Ingestor(repo);
@@ -120,6 +125,60 @@ describe('Ingestor', () => {
     expect(phases).toContain('parsing');
     expect(phases).toContain('labelling');
     expect(phases).toContain('indexing');
+  });
+
+  describe('nano reuse', () => {
+    function stubAvailableLanguageModel(): void {
+      vi.stubGlobal('LanguageModel', {
+        availability: async () => 'available',
+        create: async () => {
+          throw new Error('LanguageModel.create() should not be called: a nano adapter was already provided');
+        },
+      });
+    }
+
+    it('labels through the nano adapter passed to the constructor instead of creating a new session', async () => {
+      stubAvailableLanguageModel();
+      const { repo } = await makeRepo();
+      const mock = new MockNanoAdapter([JSON.stringify({ label: 'a label' })]);
+      const ingestor = new Ingestor(repo, mock);
+
+      const result = await ingestor.ingest(
+        { type: 'text', content: 'Only paragraph.', title: 'Notes' },
+        { labeller: 'nano' },
+      );
+
+      expect(result.labelStrategy).toBe('nano');
+      expect(mock.callLog).toHaveLength(1);
+    });
+
+    it('still creates its own session via the default factory when no nano adapter was provided', async () => {
+      const fakeSession = {
+        prompt: async () => JSON.stringify({ label: 'a label' }),
+        clone: async () => fakeSession,
+        destroy: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      };
+      let createCalls = 0;
+      vi.stubGlobal('LanguageModel', {
+        availability: async () => 'available',
+        create: async () => {
+          createCalls += 1;
+          return fakeSession;
+        },
+      });
+      const { repo } = await makeRepo();
+      const ingestor = new Ingestor(repo); // no nano adapter given
+
+      const result = await ingestor.ingest(
+        { type: 'text', content: 'Only paragraph.', title: 'Notes' },
+        { labeller: 'nano' },
+      );
+
+      expect(result.labelStrategy).toBe('nano');
+      expect(createCalls).toBe(1);
+    });
   });
 
   describe('reindex', () => {

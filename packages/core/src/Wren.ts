@@ -83,7 +83,7 @@ export class Wren {
     const repo = new DocumentRepository(storage);
     const retriever = new LexicalRetriever(storage);
     const registry = new ToolRegistry(opts.toolCap);
-    const ingestor = new Ingestor(repo);
+    const ingestor = new Ingestor(repo, nano);
     const dispatcher = new Dispatcher(nano, retriever, repo, registry);
 
     return new Wren(storage, nano, repo, registry, ingestor, dispatcher, {
