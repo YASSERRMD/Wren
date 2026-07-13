@@ -10,6 +10,16 @@ export interface FieldExplanation {
 }
 
 const MAX_COPILOT_STEPS = ALL_FIELDS.length + 2;
+/**
+ * A single unproductive step (nothing extracted, or a rejected tool call)
+ * is tolerated rather than ending the run: against a real on-device model,
+ * one low-confidence "none"/wrong-field response does not reliably mean
+ * there is nothing left to extract (see the linked accuracy issue). Giving
+ * up only after two in a row is what the existing MAX_COPILOT_STEPS "+2"
+ * headroom was already sized for; previously nothing used that headroom,
+ * since the loop bailed on the very first unproductive step.
+ */
+const MAX_CONSECUTIVE_MISSES = 2;
 
 export function useFormCopilot() {
   const { wren, status } = useWren();
@@ -46,6 +56,7 @@ export function useFormCopilot() {
       setRunning(true);
       setLog([]);
       let lastApplied: string | undefined;
+      let consecutiveMisses = 0;
       // Local to this run and updated synchronously the instant a tool call
       // succeeds, rather than read back through React state: setValues()
       // only takes effect once this component next re-renders, which is not
@@ -65,11 +76,21 @@ export function useFormCopilot() {
 
           if (response.action !== 'tool') {
             appendLog(response.answer);
-            break;
+            consecutiveMisses += 1;
+            if (consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
+              appendLog('Stopped: nothing more could be determined from what was said.');
+              break;
+            }
+            continue;
           }
 
           if (response.toolCall?.isError) {
             appendLog(`Not applied: ${response.toolCall.result}`);
+            consecutiveMisses += 1;
+            if (consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
+              appendLog('Stopped: nothing more could be determined from what was said.');
+              break;
+            }
             continue;
           }
 
@@ -83,6 +104,7 @@ export function useFormCopilot() {
             break;
           }
           lastApplied = signature;
+          consecutiveMisses = 0;
           if (appliedField) filled[appliedField] = appliedValue;
 
           if (appliedField) {
