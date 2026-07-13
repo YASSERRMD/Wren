@@ -124,7 +124,7 @@ describe('Wren', () => {
       const sectionId = tree.children[0].sectionId;
 
       nano.enqueue(JSON.stringify({ action: 'answer', sectionIds: [sectionId] }), 'Short answer.');
-      const response = await wren.query('anything');
+      const response = await wren.query('heading');
 
       expect(response.answer).toBe('Short answer.');
       expect(response.warnings).toEqual([]);
