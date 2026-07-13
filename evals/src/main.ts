@@ -97,7 +97,7 @@ function renderCasesTable(outcomes: CaseOutcome[]): string {
         <td>${evalCase.query}</td>
         <td>${evalCase.expectedAction}</td>
         <td>${error !== undefined ? `ERROR: ${error}` : response?.action}</td>
-        <td>${response?.hops ?? '—'}</td>
+        <td>${response?.hops ?? 'n/a'}</td>
         <td>${formatOptionalBool(retrievalCorrect)}</td>
         <td>${formatOptionalBool(toolCorrect)}</td>
       </tr>`)
