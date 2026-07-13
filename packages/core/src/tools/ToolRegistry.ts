@@ -98,6 +98,18 @@ export class ToolRegistry {
    * duplicate name at the WebMCP layer, invalid schema) is swallowed
    * rather than surfaced, since the registry's own state already updated
    * synchronously above and that is what Wren's own dispatcher relies on.
+   *
+   * KNOWN GAP, tracked rather than assumed-working: this bridge is
+   * unit-tested only against a stubbed navigator.modelContext (see
+   * ToolRegistry.test.ts's 'WebMCP bridge' suite), never against a real
+   * navigator.modelContext.registerTool implementation. navigator.modelContext
+   * has been observed undefined both in an Electron-bundled Chromium and in
+   * real Chrome 149.0.0.0 with LanguageModel.availability() reporting
+   * 'available', despite webmcp.ts's doc comment noting Chrome 149 as the
+   * origin-trial version: shipping in that Chrome version is evidently not
+   * enough on its own, and origin-trial enrollment (or a hand-rolled
+   * polyfill of the surface, for testing) is still needed before this can
+   * be exercised end-to-end.
    */
   private mirrorToWebMcp(tool: WrenTool): void {
     if (typeof navigator === 'undefined' || !navigator.modelContext) return;
