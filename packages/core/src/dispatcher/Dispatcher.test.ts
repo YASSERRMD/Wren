@@ -58,6 +58,23 @@ describe('Dispatcher', () => {
         { sectionId: 's1', heading: 'Photosynthesis', snippet: 'Plants convert light into energy.' },
       ]);
     });
+
+    it('gives the decision prompt explicit per-action criteria rather than a bare list of names', async () => {
+      await repo.insertSections([
+        section({ id: 's1', heading: 'Photosynthesis', content: 'Plants convert light into energy.', label: 'About plants' }),
+      ]);
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'answer', sectionIds: ['s1'] }),
+        'Plants use light to make energy.',
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      await dispatcher.run('how do plants get energy?');
+
+      const decisionPrompt = nano.callLog[0].input;
+      expect(decisionPrompt).toContain('Prefer this over none whenever a candidate genuinely relates');
+      expect(decisionPrompt).toContain('Do not choose answer or tool just to avoid saying none');
+    });
   });
 
   describe('tool action', () => {
