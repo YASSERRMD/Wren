@@ -140,7 +140,12 @@ pnpm --filter react-demo dev
 - Chrome desktop with the Prompt API and the on-device Nano model
   available.
 - The WebMCP origin trial or flag, for the tool bridge to external agents.
-  Wren's own dispatcher works without it.
+  Wren's own dispatcher works without it. This bridge (`ToolRegistry`'s
+  mirroring into `navigator.modelContext`) is unit-tested against a stubbed
+  implementation but has not yet been exercised against a real one:
+  `navigator.modelContext` has been observed undefined even in Chrome 149
+  with Nano available, so origin-trial enrollment on top of the Chrome
+  version is apparently still required. Track this as unverified.
 - No Cross-Origin-Opener-Policy or Cross-Origin-Embedder-Policy headers are
   required for storage. `WrenStorage` uses the OPFS SAHPool VFS, which does
   not rely on `SharedArrayBuffer` or `Atomics.wait` the way the default
