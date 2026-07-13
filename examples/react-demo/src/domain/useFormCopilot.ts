@@ -94,7 +94,7 @@ export function useFormCopilot() {
             'Still-empty form fields (use the identifier before the colon as the field argument, not its label):',
             emptyFields.map(describeField).join('\n'),
             '',
-            'Fill in exactly one still-empty field that can be determined from what the applicant said, using fill_field or select_option. If nothing more can be determined from what they said, say so instead of calling a tool.',
+            'This is a form-filling task, not a question to answer: call fill_field or select_option for exactly one still-empty field that is directly and explicitly stated in what the applicant said. Do not explain rules, describe the form, or guess or default a value for anything not explicitly stated. If nothing more can be determined from what they said, say so instead of calling a tool.',
           ].join('\n');
           const response = await wren.query(prompt);
 
