@@ -86,6 +86,27 @@ describe('Dispatcher', () => {
       expect(response.citations).toEqual([]);
     });
 
+    it('steers the follow-up prompt toward prose instead of echoing the tool call JSON', async () => {
+      registry.register({
+        name: 'get_weather',
+        description: 'looks up the weather',
+        inputSchema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] },
+        execute: async (args) => ({ content: `Sunny in ${String(args.city)}` }),
+      });
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'tool', tool: 'get_weather', args: { city: 'Lagos' } }),
+        'It is sunny in Lagos.',
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      await dispatcher.run('what is the weather in Lagos?');
+
+      const followupPrompt = nano.callLog[1].input;
+      expect(followupPrompt).toContain('Sunny in Lagos');
+      expect(followupPrompt).toContain('Write one short, natural-language sentence');
+      expect(followupPrompt).toContain('Do not repeat the tool name, its arguments, or any JSON');
+    });
+
     it('surfaces isError on the toolCall when the tool rejects its arguments', async () => {
       registry.register({
         name: 'select_option',
