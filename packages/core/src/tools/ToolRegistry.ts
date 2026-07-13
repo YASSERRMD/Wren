@@ -26,6 +26,8 @@ export class ToolRegistry {
   private readonly tools = new Map<string, WrenTool>();
   private readonly webmcpControllers = new Map<string, AbortController>();
 
+  constructor(private readonly toolCap: number = TOOL_CAP) {}
+
   register(tool: WrenTool): () => void {
     this.assertValidName(tool.name);
     this.tools.set(tool.name, tool);
@@ -82,9 +84,9 @@ export class ToolRegistry {
   }
 
   private warnIfOverCap(): void {
-    if (this.tools.size > TOOL_CAP) {
+    if (this.tools.size > this.toolCap) {
       console.warn(
-        `Wren: ${this.tools.size} tools registered, exceeding the recommended cap of ${TOOL_CAP}. ` +
+        `Wren: ${this.tools.size} tools registered, exceeding the recommended cap of ${this.toolCap}. ` +
           `Nano's tool selection accuracy degrades as tool count rises.`,
       );
     }
