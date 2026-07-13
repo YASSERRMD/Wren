@@ -21,6 +21,16 @@ type StableCreateOptions = Pick<LanguageModelCreateOptions, 'initialPrompts' | '
 const DEFAULT_EXPECTED_OUTPUTS: LanguageModelCreateOptions['expectedOutputs'] = [{ type: 'text', languages: ['en'] }];
 
 /**
+ * Matches V8's own wording for a JSON.parse() failure caused by the input
+ * ending before the value finished, e.g. a string opened but never closed:
+ * a token-budget/output-length symptom, distinct from a well-formed
+ * response shaped wrong (wrong schema), which is never worth retrying.
+ */
+function isTruncatedJsonError(message: string): boolean {
+  return /unterminated string/i.test(message) || /unexpected end of json input/i.test(message);
+}
+
+/**
  * The interface everything downstream of Nano (labelling, the dispatcher,
  * etc.) should depend on, rather than the concrete NanoAdapter, so
  * MockNanoAdapter can stand in for every test outside the eval harness.
@@ -78,15 +88,31 @@ export class NanoAdapter implements NanoAdapterLike {
     schema: JsonSchema,
     opts: LanguageModelPromptOptions = {},
   ): Promise<T> {
+    return this.promptStructuredAttempt<T>(input, schema, opts, true);
+  }
+
+  /**
+   * retryOnTruncation is true only for the first attempt: a truncated retry
+   * response is treated like any other malformed response rather than
+   * retried again, so one flaky call can cost at most two prompts.
+   */
+  private async promptStructuredAttempt<T>(
+    input: string,
+    schema: JsonSchema,
+    opts: LanguageModelPromptOptions,
+    retryOnTruncation: boolean,
+  ): Promise<T> {
     const raw = await this.prompt(input, { ...opts, responseConstraint: schema as object });
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
-      throw new WrenSchemaError(
-        `Nano response was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-        raw,
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      if (retryOnTruncation && isTruncatedJsonError(message)) {
+        const retryInput = `${input}\n\n(Your previous response was cut off before it finished. Respond again with the same JSON, shorter and complete.)`;
+        return this.promptStructuredAttempt<T>(retryInput, schema, opts, false);
+      }
+      throw new WrenSchemaError(`Nano response was not valid JSON: ${message}`, raw);
     }
     if (!matchesSchema(parsed, schema)) {
       throw new WrenSchemaError('Nano response did not match the expected schema', raw);

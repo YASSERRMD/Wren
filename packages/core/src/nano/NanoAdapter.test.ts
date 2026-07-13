@@ -261,6 +261,79 @@ describe('NanoAdapter', () => {
       const adapter = await NanoAdapter.create();
       await expect(adapter.promptStructured('summarize', schema)).rejects.toBeInstanceOf(WrenSchemaError);
     });
+
+    it('retries once on a truncated-JSON response and returns the retry result', async () => {
+      const session = stubLanguageModel({});
+      let callCount = 0;
+      session.promptImpl = async () => {
+        callCount += 1;
+        return callCount === 1 ? '{"label": "cut off' : JSON.stringify({ label: 'complete' });
+      };
+      const adapter = await NanoAdapter.create();
+
+      const result = await adapter.promptStructured<{ label: string }>('summarize', schema);
+
+      expect(result).toEqual({ label: 'complete' });
+      expect(callCount).toBe(2);
+    });
+
+    it('sends a note about the cut-off response on the retry prompt', async () => {
+      const session = stubLanguageModel({});
+      const inputs: string[] = [];
+      session.promptImpl = async (input) => {
+        inputs.push(input);
+        // Cut off right after the property's colon: "Unexpected end of JSON input", the other truncation shape.
+        return inputs.length === 1 ? '{"label":' : JSON.stringify({ label: 'ok' });
+      };
+      const adapter = await NanoAdapter.create();
+
+      await adapter.promptStructured('summarize this', schema);
+
+      expect(inputs[0]).toBe('summarize this');
+      expect(inputs[1]).toContain('summarize this');
+      expect(inputs[1]).toContain('cut off before it finished');
+    });
+
+    it('does not retry a second time when the retry response is truncated again', async () => {
+      const session = stubLanguageModel({});
+      let callCount = 0;
+      session.promptImpl = async () => {
+        callCount += 1;
+        return '{"label": "cut off';
+      };
+      const adapter = await NanoAdapter.create();
+
+      const caught = await adapter.promptStructured('summarize', schema).catch((e: unknown) => e);
+
+      expect(caught).toBeInstanceOf(WrenSchemaError);
+      expect(callCount).toBe(2);
+    });
+
+    it('does not retry a malformed-but-not-truncated JSON response', async () => {
+      const session = stubLanguageModel({});
+      let callCount = 0;
+      session.promptImpl = async () => {
+        callCount += 1;
+        return 'not json {{{';
+      };
+      const adapter = await NanoAdapter.create();
+
+      await expect(adapter.promptStructured('summarize', schema)).rejects.toBeInstanceOf(WrenSchemaError);
+      expect(callCount).toBe(1);
+    });
+
+    it('does not retry a well-formed response that simply does not match the schema', async () => {
+      const session = stubLanguageModel({});
+      let callCount = 0;
+      session.promptImpl = async () => {
+        callCount += 1;
+        return JSON.stringify({ wrongKey: 1 });
+      };
+      const adapter = await NanoAdapter.create();
+
+      await expect(adapter.promptStructured('summarize', schema)).rejects.toBeInstanceOf(WrenSchemaError);
+      expect(callCount).toBe(1);
+    });
   });
 
   describe('estimateTokens', () => {
