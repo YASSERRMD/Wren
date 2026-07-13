@@ -22,6 +22,8 @@ export interface NanoQuota {
 export interface NanoAdapterLike {
   prompt(input: string, opts?: LanguageModelPromptOptions): Promise<string>;
   promptStructured<T>(input: string, schema: JsonSchema, opts?: LanguageModelPromptOptions): Promise<T>;
+  /** Always yields incremental deltas to its own consumers; see the implementation's doc comment for why that needs normalising. */
+  promptStreaming(input: string, opts?: LanguageModelPromptOptions): AsyncIterable<string>;
   estimateTokens(text: string): Promise<number>;
   readonly quota: NanoQuota;
   clone(): Promise<NanoAdapterLike>;
@@ -87,6 +89,37 @@ export class NanoAdapter implements NanoAdapterLike {
       throw new WrenSchemaError('Nano response did not match the expected schema', raw);
     }
     return parsed as T;
+  }
+
+  /**
+   * Chrome's own promptStreaming() has documented, version-dependent
+   * inconsistency: some builds yield cumulative text per chunk, others
+   * yield incremental deltas. Rather than pick one and be wrong on the
+   * other, this detects it per chunk (does the new chunk start with the
+   * running total so far?) and always yields a true incremental delta to
+   * its own consumers, so Wren's streaming contract is stable regardless
+   * of which behavior the underlying browser has. Falls back to a single
+   * whole-answer chunk via prompt() if this Chrome build does not expose
+   * promptStreaming at all.
+   */
+  async *promptStreaming(input: string, opts: LanguageModelPromptOptions = {}): AsyncGenerator<string> {
+    if (this.overflowed) {
+      throw new WrenContextOverflowError();
+    }
+    if (!this.session.promptStreaming) {
+      yield await this.prompt(input, opts);
+      return;
+    }
+    let runningTotal = '';
+    try {
+      for await (const chunk of this.session.promptStreaming(input, opts)) {
+        const isCumulative = runningTotal.length > 0 && chunk.startsWith(runningTotal);
+        yield isCumulative ? chunk.slice(runningTotal.length) : chunk;
+        runningTotal = isCumulative ? chunk : runningTotal + chunk;
+      }
+    } catch (error) {
+      throw this.translateError(error);
+    }
   }
 
   /**

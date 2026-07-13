@@ -73,6 +73,14 @@ export class MockNanoAdapter implements NanoAdapterLike {
     return parsed as T;
   }
 
+  /** Reuses prompt() (so the queue and callLog stay consistent), then splits the result into word chunks for a realistic-enough streaming simulation. */
+  async *promptStreaming(input: string, opts?: LanguageModelPromptOptions): AsyncGenerator<string> {
+    const full = await this.prompt(input, opts);
+    for (const word of full.split(/(?<=\s)/)) {
+      yield word;
+    }
+  }
+
   async estimateTokens(text: string): Promise<number> {
     return Math.ceil(text.length / 4);
   }
