@@ -57,6 +57,12 @@ function sectionsToCitations(sections: readonly WrenSection[]): Citation[] {
   }));
 }
 
+/**
+ * The tool name/args JSON just above the instruction is grounding context
+ * for the model, not an example of the expected reply shape; without an
+ * explicit steer, small models tend to echo that JSON back as their
+ * "answer" instead of writing prose (see the linked issue).
+ */
 function buildToolFollowupPrompt(
   query: string,
   toolName: string,
@@ -65,7 +71,8 @@ function buildToolFollowupPrompt(
 ): string {
   return (
     `Query: "${query}"\n\nTool "${toolName}" was called with ${JSON.stringify(args)} and returned:\n${result}` +
-    '\n\nAnswer the query using this result.'
+    '\n\nWrite one short, natural-language sentence that answers the query using this result. ' +
+    'Do not repeat the tool name, its arguments, or any JSON in your answer.'
   );
 }
 
