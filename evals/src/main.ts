@@ -3,7 +3,7 @@ import { Wren as WrenClass } from '@wren/core';
 import { EVAL_CASES } from './cases.js';
 import { captureEnvironment } from './environment.js';
 import { FIXTURE_DOCUMENTS } from './fixtures/index.js';
-import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
+import { errorOutcome, scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
 import { buildReport, downloadReport } from './report.js';
 import { runToolCountSweep, type SweepStep } from './sweep.js';
 import { EVAL_TOOLS } from './tools.js';
@@ -27,10 +27,16 @@ function registerTools(wren: Wren): Array<() => void> {
 async function runCases(wren: Wren): Promise<CaseOutcome[]> {
   const outcomes: CaseOutcome[] = [];
   for (const evalCase of EVAL_CASES) {
-    const response = await wren.query(evalCase.query);
-    const outcome = scoreCase(evalCase, response);
-    outcomes.push(outcome);
-    log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${outcome.routingCorrect ? 'OK' : 'MISMATCH'}`);
+    try {
+      const response = await wren.query(evalCase.query);
+      const outcome = scoreCase(evalCase, response);
+      outcomes.push(outcome);
+      log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${outcome.routingCorrect ? 'OK' : 'MISMATCH'}`);
+    } catch (error) {
+      const outcome = errorOutcome(evalCase, error);
+      outcomes.push(outcome);
+      log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=ERROR: ${outcome.error}`);
+    }
   }
   return outcomes;
 }
@@ -53,6 +59,7 @@ function renderSummary(summary: MetricsSummary): string {
     <table>
       <tbody>
         <tr><td>Routing accuracy</td><td>${formatPercent(summary.routingAccuracy)} (${summary.totalCases} cases)</td></tr>
+        <tr><td>Errors</td><td>${summary.errorCount}</td></tr>
         <tr><td>Retrieval accuracy</td><td>${formatPercent(summary.retrievalAccuracy)}</td></tr>
         <tr><td>Tool selection accuracy</td><td>${formatPercent(summary.toolSelectionAccuracy)}</td></tr>
         <tr><td>Budget truncation rate</td><td>${formatPercent(summary.budgetTruncationRate)}</td></tr>
@@ -83,14 +90,14 @@ function formatOptionalBool(value: boolean | undefined): string {
 
 function renderCasesTable(outcomes: CaseOutcome[]): string {
   const rows = outcomes
-    .map(({ evalCase, response, routingCorrect, retrievalCorrect, toolCorrect }) => `
-      <tr style="background: ${routingCorrect ? '#eaffea' : '#ffecec'}">
+    .map(({ evalCase, response, error, routingCorrect, retrievalCorrect, toolCorrect }) => `
+      <tr style="background: ${error !== undefined ? '#fff4d6' : routingCorrect ? '#eaffea' : '#ffecec'}">
         <td>${evalCase.id}</td>
         <td>${evalCase.category}</td>
         <td>${evalCase.query}</td>
         <td>${evalCase.expectedAction}</td>
-        <td>${response.action}</td>
-        <td>${response.hops}</td>
+        <td>${error !== undefined ? `ERROR: ${error}` : response?.action}</td>
+        <td>${response?.hops ?? 'n/a'}</td>
         <td>${formatOptionalBool(retrievalCorrect)}</td>
         <td>${formatOptionalBool(toolCorrect)}</td>
       </tr>`)
