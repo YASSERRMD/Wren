@@ -10,8 +10,20 @@
  * measureInputUsage to contextWindow/contextUsage/measureContextUsage;
  * both NanoDownloadMonitor properties are declared as optional so
  * NanoAdapter can feature-detect whichever a given Chrome build exposes.
+ *
+ * expectedInputs/expectedOutputs (verified against
+ * developer.chrome.com/docs/ai/prompt-api): declares the language(s) a
+ * session's input or output is expected to use. expectedOutputs is
+ * currently restricted to type 'text'; expectedInputs additionally allows
+ * 'image' and 'audio'. Supported language codes are 'en' | 'ja' | 'es' |
+ * 'de' | 'fr' (more are documented as "in development"). Omitting
+ * expectedOutputs does not fail a request, but Chrome logs a warning that
+ * output quality and safety attestation are degraded without it; see
+ * NanoAdapter.create's default.
  */
 export type NanoAvailability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
+
+export type NanoLanguageCode = 'en' | 'ja' | 'es' | 'de' | 'fr';
 
 export interface LanguageModelDownloadProgressEvent {
   loaded: number;
@@ -24,8 +36,20 @@ export interface LanguageModelMonitor {
   ): void;
 }
 
+export interface LanguageModelExpectedInput {
+  type: 'text' | 'image' | 'audio';
+  languages?: NanoLanguageCode[];
+}
+
+export interface LanguageModelExpectedOutput {
+  type: 'text';
+  languages?: NanoLanguageCode[];
+}
+
 export interface LanguageModelCreateOptions {
   initialPrompts?: unknown[];
+  expectedInputs?: LanguageModelExpectedInput[];
+  expectedOutputs?: LanguageModelExpectedOutput[];
   monitor?: (monitor: LanguageModelMonitor) => void;
   signal?: AbortSignal;
 }
