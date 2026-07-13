@@ -15,9 +15,10 @@ export interface EvalReport {
     routingCorrect: boolean;
     retrievalCorrect: boolean | null;
     toolCorrect: boolean | null;
-    hops: number;
-    durationMs: number;
+    hops: number | null;
+    durationMs: number | null;
     warnings: readonly string[];
+    error: string | null;
   }>;
 }
 
@@ -31,18 +32,19 @@ export function buildReport(
     environment,
     summary,
     toolCountSweep,
-    cases: outcomes.map(({ evalCase, response, routingCorrect, retrievalCorrect, toolCorrect }) => ({
+    cases: outcomes.map(({ evalCase, response, error, routingCorrect, retrievalCorrect, toolCorrect }) => ({
       id: evalCase.id,
       category: evalCase.category,
       query: evalCase.query,
       expectedAction: evalCase.expectedAction,
-      actualAction: response.action,
+      actualAction: response?.action ?? 'error',
       routingCorrect,
       retrievalCorrect: retrievalCorrect ?? null,
       toolCorrect: toolCorrect ?? null,
-      hops: response.hops,
-      durationMs: response.durationMs,
-      warnings: response.warnings.map((w) => w.kind),
+      hops: response?.hops ?? null,
+      durationMs: response?.durationMs ?? null,
+      warnings: response?.warnings.map((w) => w.kind) ?? [],
+      error: error ?? null,
     })),
   };
 }

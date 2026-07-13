@@ -53,6 +53,7 @@ function renderSummary(summary: MetricsSummary): string {
     <table>
       <tbody>
         <tr><td>Routing accuracy</td><td>${formatPercent(summary.routingAccuracy)} (${summary.totalCases} cases)</td></tr>
+        <tr><td>Errors</td><td>${summary.errorCount}</td></tr>
         <tr><td>Retrieval accuracy</td><td>${formatPercent(summary.retrievalAccuracy)}</td></tr>
         <tr><td>Tool selection accuracy</td><td>${formatPercent(summary.toolSelectionAccuracy)}</td></tr>
         <tr><td>Budget truncation rate</td><td>${formatPercent(summary.budgetTruncationRate)}</td></tr>
@@ -83,14 +84,14 @@ function formatOptionalBool(value: boolean | undefined): string {
 
 function renderCasesTable(outcomes: CaseOutcome[]): string {
   const rows = outcomes
-    .map(({ evalCase, response, routingCorrect, retrievalCorrect, toolCorrect }) => `
-      <tr style="background: ${routingCorrect ? '#eaffea' : '#ffecec'}">
+    .map(({ evalCase, response, error, routingCorrect, retrievalCorrect, toolCorrect }) => `
+      <tr style="background: ${error !== undefined ? '#fff4d6' : routingCorrect ? '#eaffea' : '#ffecec'}">
         <td>${evalCase.id}</td>
         <td>${evalCase.category}</td>
         <td>${evalCase.query}</td>
         <td>${evalCase.expectedAction}</td>
-        <td>${response.action}</td>
-        <td>${response.hops}</td>
+        <td>${error !== undefined ? `ERROR: ${error}` : response?.action}</td>
+        <td>${response?.hops ?? '—'}</td>
         <td>${formatOptionalBool(retrievalCorrect)}</td>
         <td>${formatOptionalBool(toolCorrect)}</td>
       </tr>`)

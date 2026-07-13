@@ -3,7 +3,10 @@ import type { EvalCase, EvalCategory } from './cases.js';
 
 export interface CaseOutcome {
   evalCase: EvalCase;
-  response: WrenResponse;
+  /** undefined when the case's query() call threw instead of returning; see `error`. */
+  response: WrenResponse | undefined;
+  /** Set when the case's query() call threw. Mutually exclusive with response. */
+  error: string | undefined;
   routingCorrect: boolean;
   /** undefined when the case has no expectedSectionHeadings (not applicable, not a failure). */
   retrievalCorrect: boolean | undefined;
@@ -32,9 +35,22 @@ export function scoreCase(evalCase: EvalCase, response: WrenResponse): CaseOutco
   return {
     evalCase,
     response,
+    error: undefined,
     routingCorrect: response.action === evalCase.expectedAction,
     retrievalCorrect: checkRetrieval(evalCase, response),
     toolCorrect: checkToolSelection(evalCase, response),
+  };
+}
+
+/** Used when a case's query() call throws, so one bad case can be recorded and skipped rather than aborting the whole run. */
+export function errorOutcome(evalCase: EvalCase, error: unknown): CaseOutcome {
+  return {
+    evalCase,
+    response: undefined,
+    error: error instanceof Error ? error.message : String(error),
+    routingCorrect: false,
+    retrievalCorrect: undefined,
+    toolCorrect: undefined,
   };
 }
 
@@ -63,6 +79,8 @@ export function computeLatencyStats(durationsMs: readonly number[]): LatencyStat
 
 export interface MetricsSummary {
   totalCases: number;
+  /** Cases whose query() call threw instead of returning; also counted against routingAccuracy. */
+  errorCount: number;
   routingAccuracy: number;
   /** Fraction correct among cases that specify expectedSectionHeadings; NaN if none do. */
   retrievalAccuracy: number;
@@ -89,10 +107,11 @@ export function summarise(outcomes: readonly CaseOutcome[], ingestDurationsMs: r
   const toolApplicable = outcomes.filter((o) => o.toolCorrect !== undefined);
   const toolCorrectCount = toolApplicable.filter((o) => o.toolCorrect).length;
 
-  const truncatedCount = outcomes.filter((o) => o.response.warnings.some((w) => w.kind === 'budget-truncated')).length;
+  const truncatedCount = outcomes.filter((o) => o.response?.warnings.some((w) => w.kind === 'budget-truncated')).length;
 
   const hopCounts: Record<number, number> = {};
   for (const { response } of outcomes) {
+    if (!response) continue;
     hopCounts[response.hops] = (hopCounts[response.hops] ?? 0) + 1;
   }
 
@@ -103,15 +122,18 @@ export function summarise(outcomes: readonly CaseOutcome[], ingestDurationsMs: r
     if (outcome.routingCorrect) bucket.routingCorrect += 1;
   }
 
+  const completed = outcomes.filter((o): o is CaseOutcome & { response: WrenResponse } => o.response !== undefined);
+
   return {
     totalCases: outcomes.length,
+    errorCount: outcomes.length - completed.length,
     routingAccuracy: fraction(routingCorrectCount, outcomes.length),
     retrievalAccuracy: fraction(retrievalCorrectCount, retrievalApplicable.length),
     toolSelectionAccuracy: fraction(toolCorrectCount, toolApplicable.length),
     budgetTruncationRate: fraction(truncatedCount, outcomes.length),
     hopCounts,
     byCategory,
-    queryLatency: computeLatencyStats(outcomes.map((o) => o.response.durationMs)),
+    queryLatency: computeLatencyStats(completed.map((o) => o.response.durationMs)),
     ingestLatency: computeLatencyStats(ingestDurationsMs),
   };
 }
