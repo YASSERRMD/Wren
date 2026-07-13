@@ -8,7 +8,8 @@ export interface Citation {
 
 export type WrenWarning =
   | { kind: 'budget-truncated'; detail: string }
-  | { kind: 'hop-cap-forced'; detail: string };
+  | { kind: 'hop-cap-forced'; detail: string }
+  | { kind: 'decision-id-mismatch'; detail: string };
 
 export interface WrenResponse {
   answer: string;

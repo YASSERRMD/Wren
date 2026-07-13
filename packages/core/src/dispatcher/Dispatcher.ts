@@ -235,7 +235,22 @@ export class Dispatcher {
       });
     }
 
-    return this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA, { signal: opts.signal });
+    const decision = await this.nano.promptStructured<DispatcherDecision>(prompt, DECISION_SCHEMA, { signal: opts.signal });
+
+    // Distinguishes "Nano returned an id it was never shown" (a hallucination)
+    // from an id that was valid at decide-time but is missing by answer-time
+    // (which loadAndBudgetSections()'s own sections.length === 0 check covers).
+    if (decision.action === 'answer') {
+      const candidateIds = new Set(current.map((c) => c.sectionId));
+      const unknownIds = decision.sectionIds.filter((id) => !candidateIds.has(id));
+      if (unknownIds.length > 0) {
+        const detail = `decide() returned sectionIds not present in the candidates it was shown: ${unknownIds.join(', ')}`;
+        console.warn(`Wren: ${detail}`);
+        warnings.push({ kind: 'decision-id-mismatch', detail });
+      }
+    }
+
+    return decision;
   }
 
   /** Ordered truncation: drop whole sections first, then, only if a single remaining section is still too big, shorten its content. */
