@@ -3,7 +3,7 @@ import { Wren as WrenClass } from '@wren/core';
 import { EVAL_CASES } from './cases.js';
 import { captureEnvironment } from './environment.js';
 import { FIXTURE_DOCUMENTS } from './fixtures/index.js';
-import { scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
+import { errorOutcome, scoreCase, summarise, type CaseOutcome, type MetricsSummary } from './metrics.js';
 import { buildReport, downloadReport } from './report.js';
 import { runToolCountSweep, type SweepStep } from './sweep.js';
 import { EVAL_TOOLS } from './tools.js';
@@ -27,10 +27,16 @@ function registerTools(wren: Wren): Array<() => void> {
 async function runCases(wren: Wren): Promise<CaseOutcome[]> {
   const outcomes: CaseOutcome[] = [];
   for (const evalCase of EVAL_CASES) {
-    const response = await wren.query(evalCase.query);
-    const outcome = scoreCase(evalCase, response);
-    outcomes.push(outcome);
-    log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${outcome.routingCorrect ? 'OK' : 'MISMATCH'}`);
+    try {
+      const response = await wren.query(evalCase.query);
+      const outcome = scoreCase(evalCase, response);
+      outcomes.push(outcome);
+      log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=${response.action} ${outcome.routingCorrect ? 'OK' : 'MISMATCH'}`);
+    } catch (error) {
+      const outcome = errorOutcome(evalCase, error);
+      outcomes.push(outcome);
+      log(`  [${evalCase.id}] expected=${evalCase.expectedAction} actual=ERROR: ${outcome.error}`);
+    }
   }
   return outcomes;
 }
