@@ -46,10 +46,15 @@ export function useFormCopilot() {
       setRunning(true);
       setLog([]);
       let lastApplied: string | undefined;
+      // Local to this run and updated synchronously the instant a tool call
+      // succeeds, rather than read back through React state: setValues()
+      // only takes effect once this component next re-renders, which is not
+      // guaranteed to have happened yet by the very next loop iteration.
+      const filled = { ...valuesRef.current };
 
       try {
         for (let step = 0; step < MAX_COPILOT_STEPS; step += 1) {
-          const emptyFields = ALL_FIELDS.filter((f) => !valuesRef.current[f.name]?.trim()).map((f) => f.name);
+          const emptyFields = ALL_FIELDS.filter((f) => !filled[f.name]?.trim()).map((f) => f.name);
           if (emptyFields.length === 0) {
             appendLog('All fields filled.');
             break;
@@ -78,6 +83,7 @@ export function useFormCopilot() {
             break;
           }
           lastApplied = signature;
+          if (appliedField) filled[appliedField] = appliedValue;
 
           if (appliedField) {
             const citationResponse = await wren.query(`What guidance explains the "${appliedField}" field?`);
