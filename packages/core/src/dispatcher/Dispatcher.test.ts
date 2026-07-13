@@ -110,6 +110,30 @@ describe('Dispatcher', () => {
     });
   });
 
+  describe('decision id mismatch', () => {
+    it('warns when decide() returns a sectionId absent from the candidates it was shown', async () => {
+      await repo.insertSections([
+        section({ id: 's1', heading: 'Photosynthesis', content: 'Plants convert light into energy.', label: 'About plants' }),
+      ]);
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'answer', sectionIds: ['s1', 'ghost'] }),
+        'Plants use light to make energy.',
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      const response = await dispatcher.run('how do plants get energy?');
+
+      expect(response.action).toBe('answer');
+      expect(response.citations).toEqual([
+        { sectionId: 's1', heading: 'Photosynthesis', snippet: 'Plants convert light into energy.' },
+      ]);
+      expect(response.warnings).toContainEqual({
+        kind: 'decision-id-mismatch',
+        detail: 'decide() returned sectionIds not present in the candidates it was shown: ghost',
+      });
+    });
+  });
+
   describe('navigate action', () => {
     it('follows a single navigate hop into a child section and then answers', async () => {
       await repo.insertSections([
