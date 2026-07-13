@@ -1,0 +1,84 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  line-height: 1.5;
+}
+
+h1 {
+  font-size: 1.4rem;
+}
+
+.degraded {
+  background: #fff4e5;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.copilot {
+  background: #f4f4f4;
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1.5rem 0;
+}
+
+.copilot textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.copilot button {
+  margin-top: 0.5rem;
+  font-size: 1rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.copilot button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.copilot-log {
+  font-size: 0.85rem;
+  color: #444;
+  margin-top: 0.75rem;
+}
+
+.form-section {
+  margin: 1.5rem 0;
+  border-top: 1px solid #ddd;
+  padding-top: 1rem;
+}
+
+.field {
+  margin-bottom: 0.85rem;
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.4rem;
+}
+
+.citation {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 0.25rem 0 0;
+}

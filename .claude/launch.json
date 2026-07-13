@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@wren/evals", "run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "react-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@wren/react-demo", "run", "dev"],
+      "port": 5174
     }
   ]
 }
