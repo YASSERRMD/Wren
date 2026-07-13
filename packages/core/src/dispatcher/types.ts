@@ -14,7 +14,7 @@ export interface WrenResponse {
   answer: string;
   citations: Citation[];
   action: 'answer' | 'tool' | 'none';
-  toolCall?: { name: string; args: Record<string, unknown>; result: string };
+  toolCall?: { name: string; args: Record<string, unknown>; result: string; isError?: boolean };
   hops: number;
   durationMs: number;
   warnings: WrenWarning[];

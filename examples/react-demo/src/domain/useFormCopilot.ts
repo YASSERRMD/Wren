@@ -63,6 +63,11 @@ export function useFormCopilot() {
             break;
           }
 
+          if (response.toolCall?.isError) {
+            appendLog(`Not applied: ${response.toolCall.result}`);
+            continue;
+          }
+
           const appliedField = String(response.toolCall?.args.field ?? '');
           const appliedValue = String(response.toolCall?.args.value ?? response.toolCall?.args.option ?? '');
           const signature = `${appliedField}=${appliedValue}`;

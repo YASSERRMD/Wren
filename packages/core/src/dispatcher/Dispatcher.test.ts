@@ -85,6 +85,29 @@ describe('Dispatcher', () => {
       });
       expect(response.citations).toEqual([]);
     });
+
+    it('surfaces isError on the toolCall when the tool rejects its arguments', async () => {
+      registry.register({
+        name: 'select_option',
+        description: 'chooses an option',
+        inputSchema: { type: 'object', properties: { option: { type: 'string' } }, required: ['option'] },
+        execute: async (args) => ({ content: `"${String(args.option)}" is not a valid option`, isError: true }),
+      });
+      const nano = new MockNanoAdapter([
+        JSON.stringify({ action: 'tool', tool: 'select_option', args: { option: 'bogus' } }),
+        'select_option {"option":"bogus"}',
+      ]);
+      const dispatcher = new Dispatcher(nano, retriever, repo, registry);
+
+      const response = await dispatcher.run('pick an option');
+
+      expect(response.toolCall).toEqual({
+        name: 'select_option',
+        args: { option: 'bogus' },
+        result: '"bogus" is not a valid option',
+        isError: true,
+      });
+    });
   });
 
   describe('navigate action', () => {
